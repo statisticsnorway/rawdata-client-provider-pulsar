@@ -9,7 +9,6 @@ import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
-import org.apache.pulsar.client.impl.ConsumerImpl;
 import org.apache.pulsar.client.impl.schema.JSONSchema;
 
 import java.util.concurrent.CompletableFuture;
@@ -47,16 +46,6 @@ class PulsarRawdataConsumer implements RawdataConsumer {
                 return null;
             }
             return toPulsarRawdataMessage(message);
-        } catch (PulsarClientException e) {
-            // TODO wrap consumer closed exception in a RawdataClosedException
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public boolean hasMessageAvailable() {
-        try {
-            return ((ConsumerImpl) consumer).hasMessageAvailable();
         } catch (PulsarClientException e) {
             // TODO wrap consumer closed exception in a RawdataClosedException
             throw new RuntimeException(e);
