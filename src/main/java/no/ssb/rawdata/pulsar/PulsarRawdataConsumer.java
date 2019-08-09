@@ -57,6 +57,11 @@ class PulsarRawdataConsumer implements RawdataConsumer {
         return consumer.receiveAsync().thenApply(m -> toPulsarRawdataMessage(m));
     }
 
+    @Override
+    public RawdataMessageId lastAcknowledgedMessageId() throws RawdataClosedException {
+        throw new UnsupportedOperationException();
+    }
+
     PulsarRawdataMessage toPulsarRawdataMessage(Message<PulsarRawdataPayload> message) {
         return new PulsarRawdataMessage(new PulsarRawdataMessageId(message.getMessageId(), message.getValue().getExternalId()), new PulsarRawdataMessageContent(message.getValue()));
     }
