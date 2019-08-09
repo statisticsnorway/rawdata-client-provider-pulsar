@@ -87,21 +87,17 @@ public class PulsarRawdataClientTck {
     }
 
     @Test
-    public void thatLastExternalIdOfProducerCanBeRead() throws InterruptedException {
+    public void thatLastExternalIdOfProducerCanBeRead() {
         RawdataProducer producer = client.producer("the-topic");
 
         producer.buffer(producer.builder().externalId("a").put("payload", new byte[5]));
         producer.buffer(producer.builder().externalId("b").put("payload", new byte[3]));
         producer.publish("a", "b");
 
-        Thread.sleep(100);
-
         assertEquals(producer.lastExternalId(), "b");
 
         producer.buffer(producer.builder().externalId("c").put("payload", new byte[7]));
         producer.publish("c");
-
-        Thread.sleep(100);
 
         assertEquals(producer.lastExternalId(), "c");
     }
