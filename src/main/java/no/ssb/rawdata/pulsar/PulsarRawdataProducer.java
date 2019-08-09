@@ -31,25 +31,10 @@ class PulsarRawdataProducer implements RawdataProducer {
     final Producer<PulsarRawdataPayload> producer;
     final Map<String, PulsarRawdataMessageContent> buffer = new ConcurrentHashMap<>();
 
-    //final Reader<PulsarRawdataPayload> reader;
-
     PulsarRawdataProducer(PulsarClient client, String topic, String producerName) throws PulsarClientException {
         this.client = client;
         this.topic = topic;
         this.producerName = producerName;
-        /*
-        try {
-            reader = client.newReader(JSONSchema.of(PulsarRawdataPayload.class))
-                    .topic(topic)
-                    .readerName(producerName + "-lastMessageIdReader")
-                    .receiverQueueSize(1)
-                    .startMessageIdInclusive()
-                    .startMessageId(MessageId.latest)
-                    .create();
-        } catch (PulsarClientException e) {
-            throw new RuntimeException(e);
-        }
-         */
         producer = client.newProducer(JSONSchema.of(PulsarRawdataPayload.class))
                 .topic(topic)
                 .producerName(producerName)
