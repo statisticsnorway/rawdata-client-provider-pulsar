@@ -7,8 +7,8 @@
     <version>0.1-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>Pulsar Rawdata Client</name>
-    <description>Pulsar Rawdata Client</description>
+    <name>Pulsar Rawdata Provider Pulsar</name>
+    <description>Pulsar Rawdata Provider Pulsar</description>
     <url>https://github.com/statisticsnorway/</url>
     <inceptionYear>2019</inceptionYear>
 
