@@ -15,10 +15,10 @@ import java.util.concurrent.TimeUnit;
 
 class PulsarRawdataConsumer implements RawdataConsumer {
 
-    final Reader<PulsarRawdataPayload> reader;
+    final Reader<PulsarRawdataMessageContent> reader;
 
     public PulsarRawdataConsumer(PulsarClient client, String topic, PulsarRawdataMessageId initialPosition) throws PulsarClientException {
-        ReaderBuilder<PulsarRawdataPayload> builder = client.newReader(Schema.AVRO(PulsarRawdataPayload.class))
+        ReaderBuilder<PulsarRawdataMessageContent> builder = client.newReader(Schema.AVRO(PulsarRawdataMessageContent.class))
                 .topic(topic);
         if (initialPosition == null) {
             builder.startMessageId(MessageId.earliest);
@@ -36,11 +36,11 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     @Override
     public PulsarRawdataMessageContent receive(int timeout, TimeUnit unit) {
         try {
-            Message<PulsarRawdataPayload> message = reader.readNext(timeout, unit);
+            Message<PulsarRawdataMessageContent> message = reader.readNext(timeout, unit);
             if (message == null) {
                 return null;
             }
-            return toPulsarRawdataMessage(message).content();
+            return message.getValue();
         } catch (PulsarClientException e) {
             // TODO wrap consumer closed exception in a RawdataClosedException
             throw new RuntimeException(e);
@@ -49,11 +49,7 @@ class PulsarRawdataConsumer implements RawdataConsumer {
 
     @Override
     public CompletableFuture<PulsarRawdataMessageContent> receiveAsync() {
-        return reader.readNextAsync().thenApply(m -> toPulsarRawdataMessage(m).content());
-    }
-
-    PulsarRawdataMessage toPulsarRawdataMessage(Message<PulsarRawdataPayload> message) {
-        return new PulsarRawdataMessage(new PulsarRawdataMessageId(message.getMessageId(), message.getValue().getExternalId()), new PulsarRawdataMessageContent(message.getValue()));
+        return reader.readNextAsync().thenApply(m -> m.getValue());
     }
 
     @Override

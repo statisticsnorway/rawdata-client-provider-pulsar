@@ -44,34 +44,38 @@ public class PulsarRawdataClientTck {
         );
         client = ProviderConfigurator.configure(configuration, "pulsar", RawdataClientInitializer.class);
 
-        PulsarAdmin admin = PulsarAdmin.builder()
+        try (PulsarAdmin admin = PulsarAdmin.builder()
                 .serviceHttpUrl("http://localhost:8080")
                 .authentication(new AuthenticationDisabled())
-                .build();
+                .build()) {
 
-        String tenant = configuration.get("pulsar.tenant");
-        String namespace = configuration.get("pulsar.namespace");
+            String tenant = configuration.get("pulsar.tenant");
+            String namespace = configuration.get("pulsar.namespace");
 
-        Tenants tenants = admin.tenants();
-        Namespaces namespaces = admin.namespaces();
-        Topics topics = admin.topics();
-        List<String> existingTenants = tenants.getTenants();
-        if (!existingTenants.contains(tenant)) {
-            // create missing tenant
-            tenants.createTenant(tenant, new TenantInfo(Set.of(), Set.of("standalone")));
-        }
-        List<String> existingNamespaces = namespaces.getNamespaces(tenant);
-        if (!existingNamespaces.contains(tenant + "/" + namespace)) {
-            // create missing namespace
-            namespaces.createNamespace(tenant + "/" + namespace);
-            namespaces.setRetention(tenant + "/" + namespace, new RetentionPolicies(-1, -1));
-        }
+            Tenants tenants = admin.tenants();
+            Namespaces namespaces = admin.namespaces();
+            Topics topics = admin.topics();
+            List<String> existingTenants = tenants.getTenants();
+            if (!existingTenants.contains(tenant)) {
+                // create missing tenant
+                tenants.createTenant(tenant, new TenantInfo(Set.of(), Set.of("standalone")));
+            }
+            List<String> existingNamespaces = namespaces.getNamespaces(tenant);
+            if (!existingNamespaces.contains(tenant + "/" + namespace)) {
+                // create missing namespace
+                namespaces.createNamespace(tenant + "/" + namespace);
+                namespaces.setRetention(tenant + "/" + namespace, new RetentionPolicies(-1, -1));
+            }
 
-        // delete all topics in namespace
-        List<String> existingTopics = namespaces.getTopics(tenant + "/" + namespace);
-        for (String topic : existingTopics) {
-            //admin.schemas().deleteSchema(topic);
-            topics.delete(topic);
+            // delete all topics in namespace
+            List<String> existingTopics = namespaces.getTopics(tenant + "/" + namespace);
+            for (String topic : existingTopics) {
+                for (String subscription : topics.getSubscriptions(topic)) {
+                    topics.deleteSubscription(topic, subscription);
+                }
+                topics.delete(topic);
+                admin.schemas().deleteSchema(topic);
+            }
         }
     }
 
@@ -81,14 +85,14 @@ public class PulsarRawdataClientTck {
     }
 
     @Test
-    public void thatLastExternalIdOfEmptyTopicCanBeReadByProducer() {
+    public void thatLastPositionOfEmptyTopicCanBeReadByProducer() {
         RawdataProducer producer = client.producer("the-topic");
 
         assertEquals(producer.lastPosition(), null);
     }
 
     @Test
-    public void thatLastExternalIdOfProducerCanBeRead() {
+    public void thatLastPositionOfProducerCanBeRead() {
         RawdataProducer producer = client.producer("the-topic");
 
         producer.buffer(producer.builder().position("a").put("payload", new byte[5]));

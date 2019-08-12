@@ -61,7 +61,7 @@ class PulsarRawdataClient implements RawdataClient {
         return consumer;
     }
 
-    public PulsarRawdataMessageId findMessageId(String topic, String externalId) {
+    public PulsarRawdataMessageId findMessageId(String topic, String position) {
         String url = "jdbc:presto://localhost:8081/pulsar";
         if (prestoDriver.get() == null) {
             try {
@@ -75,8 +75,8 @@ class PulsarRawdataClient implements RawdataClient {
         //properties.setProperty("password", "secret");
         //properties.setProperty("SSL", "true");
         try (Connection connection = prestoDriver.get().connect(url, properties)) {
-            PreparedStatement ps = connection.prepareStatement(String.format("SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE externalid = ?", tenant, namespace, topic));
-            ps.setString(1, externalId);
+            PreparedStatement ps = connection.prepareStatement(String.format("SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE position = ?", tenant, namespace, topic));
+            ps.setString(1, position);
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
                 System.out.println("SUCCESS!!!!");

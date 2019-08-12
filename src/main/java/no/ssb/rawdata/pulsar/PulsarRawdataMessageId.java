@@ -6,14 +6,14 @@ import java.util.Objects;
 
 class PulsarRawdataMessageId {
     final MessageId messageId;
-    final String externalId;
+    final String position;
 
-    PulsarRawdataMessageId(MessageId messageId, String externalId) {
+    PulsarRawdataMessageId(MessageId messageId, String position) {
         if (messageId == null) {
             throw new IllegalArgumentException("MessageId cannot be null");
         }
         this.messageId = messageId;
-        this.externalId = externalId;
+        this.position = position;
     }
 
     @Override
@@ -33,11 +33,11 @@ class PulsarRawdataMessageId {
     public String toString() {
         return "PulsarRawdataMessageId{" +
                 "messageId=" + messageId +
-                ", externalId='" + externalId + '\'' +
+                ", position='" + position + '\'' +
                 '}';
     }
 
-    public String getExternalId() {
-        return externalId;
+    public String getPosition() {
+        return position;
     }
 }
