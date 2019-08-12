@@ -4,6 +4,7 @@ import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataConsumer;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
+import org.apache.pulsar.client.api.Schema;
 
 import java.sql.Connection;
 import java.sql.Driver;
@@ -18,6 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 class PulsarRawdataClient implements RawdataClient {
+
+    static final Schema<PulsarRawdataMessageContent> schema = Schema.AVRO(PulsarRawdataMessageContent.class);
 
     final PulsarClient client;
     final String tenant;
@@ -40,7 +43,7 @@ class PulsarRawdataClient implements RawdataClient {
     public PulsarRawdataProducer producer(String topicName) {
         PulsarRawdataProducer producer;
         try {
-            producer = new PulsarRawdataProducer(client, toQualifiedPulsarTopic(topicName), producerName);
+            producer = new PulsarRawdataProducer(client, toQualifiedPulsarTopic(topicName), producerName, schema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
@@ -53,7 +56,7 @@ class PulsarRawdataClient implements RawdataClient {
         PulsarRawdataConsumer consumer;
         try {
             //PulsarRawdataMessageId initialMessage = findMessageId(topic, initialPosition); // TODO
-            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), null);
+            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), null, schema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }

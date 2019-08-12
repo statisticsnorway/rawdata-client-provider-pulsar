@@ -42,12 +42,12 @@ class PulsarRawdataProducer implements RawdataProducer {
     final AtomicReference<Thread> lastMessageIdThreadRef = new AtomicReference<>();
     final AtomicReference<PulsarRawdataMessageId> lastMessageId = new AtomicReference<>();
 
-    PulsarRawdataProducer(PulsarClient client, String topic, String producerName) throws PulsarClientException {
+    PulsarRawdataProducer(PulsarClient client, String topic, String producerName, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
         this.client = client;
         this.topic = topic;
         this.producerName = producerName;
         try {
-            lastPositionSubscriptionRef.set(client.newConsumer(Schema.AVRO(PulsarRawdataMessageContent.class))
+            lastPositionSubscriptionRef.set(client.newConsumer(schema)
                     .topic(topic)
                     .subscriptionType(SubscriptionType.Exclusive)
                     .consumerName(producerName)
@@ -59,7 +59,7 @@ class PulsarRawdataProducer implements RawdataProducer {
         }
         lastMessageIdThreadRef.set(new Thread(new LastMessageIdRunnable(), topic + "::lastPositionTracking"));
         lastMessageIdThreadRef.get().start();
-        producer = client.newProducer(Schema.AVRO(PulsarRawdataMessageContent.class))
+        producer = client.newProducer(schema)
                 .topic(topic)
                 .producerName(producerName)
                 .create();

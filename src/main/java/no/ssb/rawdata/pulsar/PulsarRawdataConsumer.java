@@ -17,8 +17,8 @@ class PulsarRawdataConsumer implements RawdataConsumer {
 
     final Reader<PulsarRawdataMessageContent> reader;
 
-    public PulsarRawdataConsumer(PulsarClient client, String topic, PulsarRawdataMessageId initialPosition) throws PulsarClientException {
-        ReaderBuilder<PulsarRawdataMessageContent> builder = client.newReader(Schema.AVRO(PulsarRawdataMessageContent.class))
+    public PulsarRawdataConsumer(PulsarClient client, String topic, PulsarRawdataMessageId initialPosition, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
+        ReaderBuilder<PulsarRawdataMessageContent> builder = client.newReader(schema)
                 .topic(topic);
         if (initialPosition == null) {
             builder.startMessageId(MessageId.earliest);
