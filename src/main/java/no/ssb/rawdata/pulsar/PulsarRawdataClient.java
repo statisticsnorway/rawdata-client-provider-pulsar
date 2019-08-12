@@ -1,6 +1,8 @@
 package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataClient;
+import org.apache.pulsar.client.admin.PulsarAdmin;
+import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 
@@ -10,6 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 class PulsarRawdataClient implements RawdataClient {
 
+    final PulsarAdmin admin;
     final PulsarClient client;
     final String tenant;
     final String namespace;
@@ -20,7 +23,8 @@ class PulsarRawdataClient implements RawdataClient {
     final List<PulsarRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<PulsarRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    PulsarRawdataClient(PulsarClient client, String tenant, String namespace, String producerName, String consumerName) {
+    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String tenant, String namespace, String producerName, String consumerName) {
+        this.admin = admin;
         this.client = client;
         this.tenant = tenant;
         this.namespace = namespace;
@@ -48,8 +52,8 @@ class PulsarRawdataClient implements RawdataClient {
     public PulsarRawdataConsumer consumer(String topicName, String subscription) {
         PulsarRawdataConsumer consumer;
         try {
-            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topicName), consumerName, subscription);
-        } catch (PulsarClientException e) {
+            consumer = new PulsarRawdataConsumer(admin, client, tenant + "/" + namespace, toQualifiedPulsarTopic(topicName), consumerName, subscription);
+        } catch (PulsarClientException | PulsarAdminException e) {
             throw new RuntimeException(e);
         }
         consumers.add(consumer);
@@ -89,6 +93,7 @@ class PulsarRawdataClient implements RawdataClient {
                 // ignore
             }
         }
+        admin.close();
         closed.set(true);
     }
 }

@@ -10,10 +10,10 @@ import org.apache.pulsar.client.api.Message;
 import org.apache.pulsar.client.api.Producer;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
+import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.client.impl.ConsumerImpl;
-import org.apache.pulsar.client.impl.schema.JSONSchema;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,7 +48,7 @@ class PulsarRawdataProducer implements RawdataProducer {
         this.topic = topic;
         this.producerName = producerName;
         try {
-            lastExternalIdSubscriptionRef.set(client.newConsumer(JSONSchema.of(PulsarRawdataPayload.class))
+            lastExternalIdSubscriptionRef.set(client.newConsumer(Schema.AVRO(PulsarRawdataPayload.class))
                     .topic(topic)
                     .subscriptionType(SubscriptionType.Exclusive)
                     .consumerName(producerName)
@@ -60,7 +60,7 @@ class PulsarRawdataProducer implements RawdataProducer {
         }
         lastMessageIdThreadRef.set(new Thread(new LastMessageIdRunnable(), topic + "::lastExternalIdTracking"));
         lastMessageIdThreadRef.get().start();
-        producer = client.newProducer(JSONSchema.of(PulsarRawdataPayload.class))
+        producer = client.newProducer(Schema.AVRO(PulsarRawdataPayload.class))
                 .topic(topic)
                 .producerName(producerName)
                 .create();

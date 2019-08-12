@@ -3,14 +3,18 @@ package no.ssb.rawdata.pulsar;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessageId;
+import org.apache.pulsar.client.admin.PulsarAdmin;
+import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Consumer;
+import org.apache.pulsar.client.api.ConsumerBuilder;
 import org.apache.pulsar.client.api.Message;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
+import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
-import org.apache.pulsar.client.impl.schema.JSONSchema;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -18,14 +22,23 @@ class PulsarRawdataConsumer implements RawdataConsumer {
 
     final Consumer<PulsarRawdataPayload> consumer;
 
-    PulsarRawdataConsumer(PulsarClient client, String topic, String consumerName, String subscription) throws PulsarClientException {
-        this.consumer = client.newConsumer(JSONSchema.of(PulsarRawdataPayload.class))
+    PulsarRawdataConsumer(PulsarAdmin admin, PulsarClient client, String namespace, String topic, String consumerName, String subscription) throws PulsarClientException, PulsarAdminException {
+        List<String> topics = admin.namespaces().getTopics(namespace);
+        boolean startFromEarliestMessage = true;
+        if (topics.contains(topic)) {
+            List<String> subscriptions = admin.topics().getSubscriptions(topic);
+            startFromEarliestMessage = !subscriptions.contains(subscription);
+        }
+
+        ConsumerBuilder<PulsarRawdataPayload> builder = client.newConsumer(Schema.AVRO(PulsarRawdataPayload.class))
                 .topic(topic)
                 .subscriptionType(SubscriptionType.Exclusive)
                 .consumerName(consumerName)
-                .subscriptionName(subscription)
-                .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                .subscribe();
+                .subscriptionName(subscription);
+        if (startFromEarliestMessage) {
+            builder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
+        }
+        this.consumer = builder.subscribe();
     }
 
     @Override
@@ -57,11 +70,6 @@ class PulsarRawdataConsumer implements RawdataConsumer {
         return consumer.receiveAsync().thenApply(m -> toPulsarRawdataMessage(m));
     }
 
-    @Override
-    public RawdataMessageId lastAcknowledgedMessageId() throws RawdataClosedException {
-        throw new UnsupportedOperationException();
-    }
-
     PulsarRawdataMessage toPulsarRawdataMessage(Message<PulsarRawdataPayload> message) {
         return new PulsarRawdataMessage(new PulsarRawdataMessageId(message.getMessageId(), message.getValue().getExternalId()), new PulsarRawdataMessageContent(message.getValue()));
     }
@@ -69,7 +77,7 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     @Override
     public void acknowledgeAccumulative(RawdataMessageId id) throws RawdataClosedException {
         try {
-            consumer.acknowledgeCumulative(((PulsarRawdataMessageId) id).messageId);
+            consumer.acknowledge(((PulsarRawdataMessageId) id).messageId);
         } catch (PulsarClientException e) {
             // TODO wrap consumer closed exception in a RawdataClosedException
             throw new RuntimeException(e);

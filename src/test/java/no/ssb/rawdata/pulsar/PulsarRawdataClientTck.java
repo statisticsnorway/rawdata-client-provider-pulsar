@@ -15,7 +15,7 @@ import org.apache.pulsar.client.admin.Tenants;
 import org.apache.pulsar.client.admin.Topics;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.impl.auth.AuthenticationDisabled;
-import org.apache.pulsar.client.impl.conf.ClientConfigurationData;
+import org.apache.pulsar.common.policies.data.RetentionPolicies;
 import org.apache.pulsar.common.policies.data.TenantInfo;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.TimeUnit;
 
 import static org.testng.Assert.assertEquals;
@@ -45,13 +47,13 @@ public class PulsarRawdataClientTck {
         );
         client = ProviderConfigurator.configure(configuration, "pulsar", RawdataClientInitializer.class);
 
-        String adminServiceUrl = "http://localhost:8080";
+        PulsarAdmin admin = PulsarAdmin.builder()
+                .serviceHttpUrl("http://localhost:8080")
+                .authentication(new AuthenticationDisabled())
+                .build();
+
         String tenant = configuration.get("pulsar.tenant");
         String namespace = configuration.get("pulsar.namespace");
-        ClientConfigurationData config = new ClientConfigurationData();
-        config.setAuthentication(new AuthenticationDisabled());
-        config.setServiceUrl(adminServiceUrl);
-        PulsarAdmin admin = new PulsarAdmin(adminServiceUrl, config);
 
         Tenants tenants = admin.tenants();
         Namespaces namespaces = admin.namespaces();
@@ -65,11 +67,13 @@ public class PulsarRawdataClientTck {
         if (!existingNamespaces.contains(tenant + "/" + namespace)) {
             // create missing namespace
             namespaces.createNamespace(tenant + "/" + namespace);
+            namespaces.setRetention(tenant + "/" + namespace, new RetentionPolicies(-1, -1));
         }
 
         // delete all topics in namespace
         List<String> existingTopics = namespaces.getTopics(tenant + "/" + namespace);
         for (String topic : existingTopics) {
+            admin.schemas().deleteSchema(topic);
             topics.delete(topic);
         }
     }
@@ -204,5 +208,42 @@ public class PulsarRawdataClientTck {
         assertEquals(messages2.get(0).content(), expected1);
         assertEquals(messages2.get(1).content(), expected2);
         assertEquals(messages2.get(2).content(), expected3);
+    }
+
+    @Test
+    public void thatConsumerResumingFromMiddleOfTopicWorks() throws Exception {
+        ForkJoinTask<?> task = ForkJoinPool.commonPool().submit(() -> {
+            try (RawdataConsumer consumer = client.consumer("the-topic", "sub1")) {
+                RawdataMessage messageA = consumer.receive(3, TimeUnit.SECONDS);
+                assertEquals(messageA.content().externalId(), "a");
+                consumer.acknowledgeAccumulative(messageA.id());
+                RawdataMessage messageB = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(messageB.content().externalId(), "b");
+                consumer.acknowledgeAccumulative(messageB.id());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            try (RawdataConsumer consumer = client.consumer("the-topic", "sub1")) {
+                RawdataMessage messageC = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(messageC.content().externalId(), "c");
+                RawdataMessage messageD = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(messageD.content().externalId(), "d");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        Thread.sleep(250);
+        new Thread(() -> {
+            try (RawdataProducer producer = client.producer("the-topic")) {
+                producer.buffer(producer.builder().externalId("a").put("payload", new byte[5]));
+                producer.buffer(producer.builder().externalId("b").put("payload", new byte[3]));
+                producer.buffer(producer.builder().externalId("c").put("payload", new byte[7]));
+                producer.buffer(producer.builder().externalId("d").put("payload", new byte[7]));
+                producer.publish("a", "b", "c", "d");
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
+        task.join();
     }
 }
