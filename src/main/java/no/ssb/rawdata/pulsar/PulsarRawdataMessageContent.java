@@ -2,6 +2,7 @@ package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataMessage;
 
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -62,7 +63,16 @@ public class PulsarRawdataMessageContent implements RawdataMessage {
         if (o == null || getClass() != o.getClass()) return false;
         PulsarRawdataMessageContent that = (PulsarRawdataMessageContent) o;
         return Objects.equals(position, that.position) &&
-                Objects.equals(data, that.data);
+                allArraysEquals(that);
+    }
+
+    private boolean allArraysEquals(PulsarRawdataMessageContent that) {
+        for (Map.Entry<String, byte[]> entry : data.entrySet()) {
+            if (!Arrays.equals(entry.getValue(), that.data.get(entry.getKey()))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
