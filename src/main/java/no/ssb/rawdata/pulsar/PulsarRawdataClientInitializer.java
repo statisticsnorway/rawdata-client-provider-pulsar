@@ -3,10 +3,8 @@ package no.ssb.rawdata.pulsar;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.service.provider.api.ProviderName;
-import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
-import org.apache.pulsar.client.impl.auth.AuthenticationDisabled;
 
 import java.util.Map;
 import java.util.Set;
@@ -25,8 +23,7 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
                 "pulsar.service.url",
                 "pulsar.tenant",
                 "pulsar.namespace",
-                "pulsar.producer",
-                "pulsar.consumer"
+                "pulsar.producer"
         );
     }
 
@@ -40,14 +37,8 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
             String tenant = configuration.get("pulsar.tenant");
             String namespace = configuration.get("pulsar.namespace");
             String producerName = configuration.get("pulsar.producer");
-            String consumerName = configuration.get("pulsar.consumer");
 
-            PulsarAdmin admin = PulsarAdmin.builder()
-                    .serviceHttpUrl("http://localhost:8080")
-                    .authentication(new AuthenticationDisabled())
-                    .build();
-
-            return new PulsarRawdataClient(admin, pulsarClient, tenant, namespace, producerName, consumerName);
+            return new PulsarRawdataClient(pulsarClient, tenant, namespace, producerName);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }

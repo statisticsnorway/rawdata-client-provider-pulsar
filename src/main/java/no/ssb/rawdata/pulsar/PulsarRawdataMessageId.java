@@ -1,11 +1,10 @@
 package no.ssb.rawdata.pulsar;
 
-import no.ssb.rawdata.api.RawdataMessageId;
 import org.apache.pulsar.client.api.MessageId;
 
 import java.util.Objects;
 
-class PulsarRawdataMessageId implements RawdataMessageId {
+class PulsarRawdataMessageId {
     final MessageId messageId;
     final String externalId;
 

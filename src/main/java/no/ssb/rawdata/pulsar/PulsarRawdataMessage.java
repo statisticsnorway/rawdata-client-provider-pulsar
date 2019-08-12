@@ -1,10 +1,8 @@
 package no.ssb.rawdata.pulsar;
 
-import no.ssb.rawdata.api.RawdataMessage;
-
 import java.util.Objects;
 
-public class PulsarRawdataMessage implements RawdataMessage {
+public class PulsarRawdataMessage {
     private final PulsarRawdataMessageId id;
     private final PulsarRawdataMessageContent content;
 
@@ -19,12 +17,10 @@ public class PulsarRawdataMessage implements RawdataMessage {
         this.content = content;
     }
 
-    @Override
     public PulsarRawdataMessageId id() {
         return id;
     }
 
-    @Override
     public PulsarRawdataMessageContent content() {
         return content;
     }

@@ -4,7 +4,6 @@ import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
-import no.ssb.rawdata.api.RawdataMessageContent;
 import no.ssb.rawdata.api.RawdataProducer;
 import no.ssb.service.provider.api.ProviderConfigurator;
 import org.apache.pulsar.client.admin.Namespaces;
@@ -94,24 +93,24 @@ public class SchemaDeleteTest {
     @Test
     public void thatSingleMessageCanBeProducedAndConsumerSynchronously() throws InterruptedException {
         RawdataProducer producer = client.producer("the-topic");
-        RawdataConsumer consumer = client.consumer("the-topic", "sub1");
+        RawdataConsumer consumer = client.consumer("the-topic");
 
-        RawdataMessageContent expected1 = producer.buffer(producer.builder().externalId("a").put("payload", new byte[5]));
-        producer.publish(expected1.externalId());
+        RawdataMessage expected1 = producer.buffer(producer.builder().position("a").put("payload", new byte[5]));
+        producer.publish(expected1.position());
 
         RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
-        assertEquals(message.content(), expected1);
+        assertEquals(message, expected1);
     }
 
     @Test
     public void XthatSingleMessageCanBeProducedAndConsumerSynchronously() throws InterruptedException {
         RawdataProducer producer = client.producer("the-topic");
-        RawdataConsumer consumer = client.consumer("the-topic", "sub1");
+        RawdataConsumer consumer = client.consumer("the-topic");
 
-        RawdataMessageContent expected1 = producer.buffer(producer.builder().externalId("a").put("payload", new byte[5]));
-        producer.publish(expected1.externalId());
+        RawdataMessage expected1 = producer.buffer(producer.builder().position("a").put("payload", new byte[5]));
+        producer.publish(expected1.position());
 
         RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
-        assertEquals(message.content(), expected1);
+        assertEquals(message, expected1);
     }
 }

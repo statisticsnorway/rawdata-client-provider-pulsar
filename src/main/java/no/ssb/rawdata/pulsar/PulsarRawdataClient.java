@@ -1,35 +1,39 @@
 package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataClient;
-import org.apache.pulsar.client.admin.PulsarAdmin;
-import org.apache.pulsar.client.admin.PulsarAdminException;
+import no.ssb.rawdata.api.RawdataConsumer;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 
+import java.sql.Connection;
+import java.sql.Driver;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 class PulsarRawdataClient implements RawdataClient {
 
-    final PulsarAdmin admin;
     final PulsarClient client;
     final String tenant;
     final String namespace;
     final String producerName;
-    final String consumerName;
 
     final AtomicBoolean closed = new AtomicBoolean(false);
     final List<PulsarRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<PulsarRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
+    final AtomicReference<Driver> prestoDriver = new AtomicReference<>();
 
-    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String tenant, String namespace, String producerName, String consumerName) {
-        this.admin = admin;
+    PulsarRawdataClient(PulsarClient client, String tenant, String namespace, String producerName) {
         this.client = client;
         this.tenant = tenant;
         this.namespace = namespace;
         this.producerName = producerName;
-        this.consumerName = consumerName;
     }
 
     @Override
@@ -44,20 +48,49 @@ class PulsarRawdataClient implements RawdataClient {
         return producer;
     }
 
-    String toQualifiedPulsarTopic(String topicName) {
-        return "persistent://" + tenant + "/" + namespace + "/" + topicName;
-    }
-
     @Override
-    public PulsarRawdataConsumer consumer(String topicName, String subscription) {
+    public RawdataConsumer consumer(String topic, String initialPosition) {
         PulsarRawdataConsumer consumer;
         try {
-            consumer = new PulsarRawdataConsumer(admin, client, tenant + "/" + namespace, toQualifiedPulsarTopic(topicName), consumerName, subscription);
-        } catch (PulsarClientException | PulsarAdminException e) {
+            //PulsarRawdataMessageId initialMessage = findMessageId(topic, initialPosition); // TODO
+            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), null);
+        } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
         consumers.add(consumer);
         return consumer;
+    }
+
+    public PulsarRawdataMessageId findMessageId(String topic, String externalId) {
+        String url = "jdbc:presto://localhost:8081/pulsar";
+        if (prestoDriver.get() == null) {
+            try {
+                prestoDriver.set(DriverManager.getDriver(url));
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        Properties properties = new Properties();
+        //properties.setProperty("user", "test");
+        //properties.setProperty("password", "secret");
+        //properties.setProperty("SSL", "true");
+        try (Connection connection = prestoDriver.get().connect(url, properties)) {
+            PreparedStatement ps = connection.prepareStatement(String.format("SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE externalid = ?", tenant, namespace, topic));
+            ps.setString(1, externalId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                System.out.println("SUCCESS!!!!");
+            }
+            return null;
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return null;
+    }
+
+    String toQualifiedPulsarTopic(String topicName) {
+        return "persistent://" + tenant + "/" + namespace + "/" + topicName;
     }
 
     @Override
@@ -93,7 +126,6 @@ class PulsarRawdataClient implements RawdataClient {
                 // ignore
             }
         }
-        admin.close();
         closed.set(true);
     }
 }

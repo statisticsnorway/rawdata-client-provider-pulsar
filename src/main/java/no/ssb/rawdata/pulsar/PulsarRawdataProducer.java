@@ -2,11 +2,11 @@ package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataContentNotBufferedException;
-import no.ssb.rawdata.api.RawdataMessageContent;
-import no.ssb.rawdata.api.RawdataMessageId;
+import no.ssb.rawdata.api.RawdataMessage;
 import no.ssb.rawdata.api.RawdataProducer;
 import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.Message;
+import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.Producer;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
@@ -20,7 +20,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -72,7 +71,7 @@ class PulsarRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public String lastExternalId() throws RawdataClosedException {
+    public String lastPosition() throws RawdataClosedException {
         writeSem.release();
         try {
             readSem.acquire();
@@ -138,19 +137,19 @@ class PulsarRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public RawdataMessageContent.Builder builder() throws RawdataClosedException {
-        return new RawdataMessageContent.Builder() {
+    public RawdataMessage.Builder builder() throws RawdataClosedException {
+        return new RawdataMessage.Builder() {
             String externalId;
             Map<String, byte[]> data = new LinkedHashMap<>();
 
             @Override
-            public RawdataMessageContent.Builder externalId(String externalId) {
-                this.externalId = externalId;
+            public RawdataMessage.Builder position(String id) {
+                this.externalId = id;
                 return this;
             }
 
             @Override
-            public RawdataMessageContent.Builder put(String key, byte[] payload) {
+            public RawdataMessage.Builder put(String key, byte[] payload) {
                 data.put(key, payload);
                 return this;
             }
@@ -163,63 +162,52 @@ class PulsarRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public PulsarRawdataMessageContent buffer(RawdataMessageContent.Builder builder) throws RawdataClosedException {
+    public PulsarRawdataMessageContent buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
         return buffer(builder.build());
     }
 
     @Override
-    public PulsarRawdataMessageContent buffer(RawdataMessageContent content) throws RawdataClosedException {
-        buffer.put(content.externalId(), (PulsarRawdataMessageContent) content);
-        return (PulsarRawdataMessageContent) content;
+    public PulsarRawdataMessageContent buffer(RawdataMessage message) throws RawdataClosedException {
+        buffer.put(message.position(), (PulsarRawdataMessageContent) message);
+        return (PulsarRawdataMessageContent) message;
     }
 
     @Override
-    public List<? extends RawdataMessageId> publish(List<String> externalIds) throws RawdataClosedException, RawdataContentNotBufferedException {
-        return publish(externalIds.toArray(new String[externalIds.size()]));
-    }
-
-    @Override
-    public List<? extends RawdataMessageId> publish(String... externalIds) throws RawdataClosedException, RawdataContentNotBufferedException {
-        try {
-            List<CompletableFuture<? extends RawdataMessageId>> futures = publishAsync(externalIds);
-            List<PulsarRawdataMessageId> result = new ArrayList<>();
-            for (CompletableFuture<? extends RawdataMessageId> future : futures) {
-                result.add((PulsarRawdataMessageId) future.join());
-            }
-            return result;
-        } catch (CompletionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RawdataContentNotBufferedException) {
-                throw (RawdataContentNotBufferedException) cause;
-            }
-            if (cause instanceof Error) {
-                throw (Error) cause;
-            }
-            if (cause instanceof RuntimeException) {
-                throw (RuntimeException) cause;
-            }
-            throw e;
-        }
-    }
-
-    @Override
-    public List<CompletableFuture<? extends RawdataMessageId>> publishAsync(String... externalIds) {
-        for (String externalId : externalIds) {
+    public void publish(String... positions) throws RawdataClosedException, RawdataContentNotBufferedException {
+        for (String externalId : positions) {
             if (!buffer.containsKey(externalId)) {
                 throw new RawdataContentNotBufferedException(String.format("externalId %s is not in buffer", externalId));
             }
         }
-        List<CompletableFuture<? extends RawdataMessageId>> result = new ArrayList<>();
-        for (String externalId : externalIds) {
+        for (String externalId : positions) {
             PulsarRawdataPayload payload = buffer.remove(externalId).payload;
-            CompletableFuture<PulsarRawdataMessageId> future = producer.newMessage()
+            try {
+                producer.newMessage()
+                        .value(payload)
+                        .send();
+            } catch (PulsarClientException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> publishAsync(String... positions) {
+        for (String externalId : positions) {
+            if (!buffer.containsKey(externalId)) {
+                throw new RawdataContentNotBufferedException(String.format("externalId %s is not in buffer", externalId));
+            }
+        }
+        List<CompletableFuture<MessageId>> result = new ArrayList<>();
+        for (String externalId : positions) {
+            PulsarRawdataPayload payload = buffer.remove(externalId).payload;
+            CompletableFuture<MessageId> future = producer.newMessage()
                     .property("externalId", payload.externalId)
                     .value(payload)
-                    .sendAsync()
-                    .thenApply(messageId -> new PulsarRawdataMessageId(messageId, externalId));
+                    .sendAsync();
             result.add(future);
         }
-        return result;
+        return CompletableFuture.allOf(result.toArray(new CompletableFuture[result.size()]));
     }
 
     @Override

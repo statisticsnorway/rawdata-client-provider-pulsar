@@ -1,12 +1,12 @@
 package no.ssb.rawdata.pulsar;
 
-import no.ssb.rawdata.api.RawdataMessageContent;
+import no.ssb.rawdata.api.RawdataMessage;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-public class PulsarRawdataMessageContent implements RawdataMessageContent {
+public class PulsarRawdataMessageContent implements RawdataMessage {
 
     final PulsarRawdataPayload payload;
 
@@ -25,7 +25,7 @@ public class PulsarRawdataMessageContent implements RawdataMessageContent {
     }
 
     @Override
-    public String externalId() {
+    public String position() {
         return payload.externalId;
     }
 
