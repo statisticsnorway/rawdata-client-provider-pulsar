@@ -57,7 +57,7 @@ class PulsarRawdataClient implements RawdataClient {
     public PulsarRawdataProducer producer(String topicName) {
         PulsarRawdataProducer producer;
         try {
-            producer = new PulsarRawdataProducer(client, toQualifiedPulsarTopic(topicName), producerName, schema);
+            producer = new PulsarRawdataProducer(admin, client, toQualifiedPulsarTopic(topicName), producerName, schema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }

@@ -4,6 +4,8 @@ import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataContentNotBufferedException;
 import no.ssb.rawdata.api.RawdataMessage;
 import no.ssb.rawdata.api.RawdataProducer;
+import org.apache.pulsar.client.admin.PulsarAdmin;
+import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.Message;
 import org.apache.pulsar.client.api.MessageId;
@@ -13,52 +15,34 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
-import org.apache.pulsar.client.impl.ConsumerImpl;
+import org.apache.pulsar.client.impl.MessageIdImpl;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-
-import static java.util.Optional.ofNullable;
 
 class PulsarRawdataProducer implements RawdataProducer {
 
+    final PulsarAdmin admin;
     final PulsarClient client;
     final String topic;
     final String producerName;
+    final Schema<PulsarRawdataMessageContent> schema;
 
     final Producer<PulsarRawdataMessageContent> producer;
     final Map<String, PulsarRawdataMessageContent> buffer = new ConcurrentHashMap<>();
 
-    final Semaphore readSem = new Semaphore(0);
-    final Semaphore writeSem = new Semaphore(0);
-    final AtomicReference<Consumer<PulsarRawdataMessageContent>> lastPositionSubscriptionRef = new AtomicReference<>();
-    final AtomicReference<Thread> lastMessageIdThreadRef = new AtomicReference<>();
-    final AtomicReference<PulsarRawdataMessageId> lastMessageId = new AtomicReference<>();
-
-    PulsarRawdataProducer(PulsarClient client, String topic, String producerName, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
+    PulsarRawdataProducer(PulsarAdmin admin, PulsarClient client, String topic, String producerName, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
+        this.admin = admin;
         this.client = client;
         this.topic = topic;
         this.producerName = producerName;
-        try {
-            lastPositionSubscriptionRef.set(client.newConsumer(schema)
-                    .topic(topic)
-                    .subscriptionType(SubscriptionType.Exclusive)
-                    .consumerName(producerName)
-                    .subscriptionName("last-position-master")
-                    .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
-                    .subscribe());
-        } catch (PulsarClientException e) {
-            throw new RuntimeException(e);
-        }
-        lastMessageIdThreadRef.set(new Thread(new LastMessageIdRunnable(), topic + "::lastPositionTracking"));
-        lastMessageIdThreadRef.get().start();
+        this.schema = schema;
         producer = client.newProducer(schema)
                 .topic(topic)
                 .producerName(producerName)
@@ -72,68 +56,31 @@ class PulsarRawdataProducer implements RawdataProducer {
 
     @Override
     public String lastPosition() throws RawdataClosedException {
-        writeSem.release();
         try {
-            readSem.acquire();
-        } catch (InterruptedException e) {
+            try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+                    .topic(topic)
+                    .subscriptionType(SubscriptionType.Exclusive)
+                    .consumerName(producerName)
+                    .subscriptionName("last-position-master-" + new Random().nextInt(Integer.MAX_VALUE))
+                    .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .subscribe()) {
+                try {
+                    MessageIdImpl lastMessageId = (MessageIdImpl) admin.topics().getLastMessageId(topic);
+                    if (lastMessageId.getEntryId() == -1) {
+                        return null; // topic is empty
+                    }
+                    consumer.seek(lastMessageId);
+                    Message<PulsarRawdataMessageContent> message = consumer.receive(30, TimeUnit.SECONDS);
+                    return message.getValue().position();
+                } catch (PulsarAdminException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    //consumer.unsubscribe();
+                }
+            }
+        } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
-        return ofNullable(lastMessageId.get()).map(PulsarRawdataMessageId::getPosition).orElse(null);
-    }
-
-    class LastMessageIdRunnable implements Runnable {
-        @Override
-        public void run() {
-            try {
-                Consumer<PulsarRawdataMessageContent> consumer = lastPositionSubscriptionRef.get();
-
-                // drain all existing messages
-                Message<PulsarRawdataMessageContent> prevMessage = null;
-                Message<PulsarRawdataMessageContent> prevPrevMessage = null;
-                for (; ; ) {
-                    Message<PulsarRawdataMessageContent> message;
-                    if (!((ConsumerImpl) consumer).hasMessageAvailable()) {
-                        break;
-                    }
-                    message = consumer.receive(5, TimeUnit.MILLISECONDS);
-                    if (message == null) {
-                        break;
-                    }
-                    prevPrevMessage = prevMessage;
-                    prevMessage = message;
-                }
-                if (prevPrevMessage != null) {
-                    // acknowledge all except for the last message
-                    consumer.acknowledgeCumulative(prevPrevMessage.getMessageId());
-                }
-                if (prevMessage != null) {
-                    // set lastMessageId from the last message in the topic
-                    lastMessageId.set(new PulsarRawdataMessageId(prevMessage.getMessageId(), prevMessage.getValue().getPosition()));
-                }
-
-                for (; ; ) {
-                    writeSem.acquire();
-                    PulsarRawdataMessageId previousMessageId = null;
-                    for (; ; ) {
-                        if (!((ConsumerImpl) consumer).hasMessageAvailable()) {
-                            break;
-                        }
-                        Message<PulsarRawdataMessageContent> message = consumer.receive(5, TimeUnit.SECONDS);
-                        if (message == null) {
-                            break;
-                        }
-                        previousMessageId = lastMessageId.getAndSet(new PulsarRawdataMessageId(message.getMessageId(), message.getValue().getPosition()));
-                    }
-                    if (previousMessageId != null) {
-                        consumer.acknowledgeCumulative(previousMessageId.messageId);
-                    }
-                    readSem.release();
-                }
-            } catch (PulsarClientException | InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
     }
 
     @Override
