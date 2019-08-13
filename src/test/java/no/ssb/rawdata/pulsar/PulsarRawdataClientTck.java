@@ -16,6 +16,8 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.impl.auth.AuthenticationDisabled;
 import org.apache.pulsar.common.policies.data.RetentionPolicies;
 import org.apache.pulsar.common.policies.data.TenantInfo;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
@@ -32,7 +34,7 @@ public class PulsarRawdataClientTck {
 
     RawdataClient client;
 
-    //@BeforeMethod
+    @BeforeMethod
     public void createRawdataClient() throws PulsarAdminException, PulsarClientException {
         Map<String, String> configuration = Map.of(
                 "pulsar.service.url", "pulsar://localhost:6650",
@@ -75,7 +77,7 @@ public class PulsarRawdataClientTck {
         }
     }
 
-    //@AfterMethod
+    @AfterMethod
     public void closeRawdataClient() throws Exception {
         client.close();
     }
@@ -114,7 +116,6 @@ public class PulsarRawdataClientTck {
 
     @Test
     public void thatSingleMessageCanBeProducedAndConsumerSynchronously() throws Exception {
-        createRawdataClient();
         RawdataMessage expected;
         try (RawdataProducer producer = client.producer("the-topic")) {
             expected = producer.buffer(producer.builder().position("a").put("payload", new byte[5]));
@@ -124,8 +125,6 @@ public class PulsarRawdataClientTck {
             RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
             assertEquals(message, expected);
         }
-        closeRawdataClient();
-        createRawdataClient();
     }
 
     @Test
