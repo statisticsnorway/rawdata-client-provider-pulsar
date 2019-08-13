@@ -33,20 +33,20 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
     @Override
     public RawdataClient initialize(Map<String, String> configuration) {
         try {
-            String serviceUrl = configuration.get("pulsar.broker.url");
             PulsarClient pulsarClient = PulsarClient.builder()
-                    .serviceUrl(serviceUrl)
+                    .serviceUrl(configuration.get("pulsar.broker.url"))
                     .build();
-            String tenant = configuration.get("pulsar.tenant");
-            String namespace = configuration.get("pulsar.namespace");
-            String producerName = configuration.get("pulsar.producer");
 
-            PulsarAdmin admin = PulsarAdmin.builder()
+            PulsarAdmin pulsarAdmin = PulsarAdmin.builder()
                     .serviceHttpUrl(configuration.get("pulsar.admin.url"))
                     .authentication(new AuthenticationDisabled())
                     .build();
 
-            return new PulsarRawdataClient(admin, pulsarClient, tenant, namespace, producerName);
+            String tenant = configuration.get("pulsar.tenant");
+            String namespace = configuration.get("pulsar.namespace");
+            String producerName = configuration.get("pulsar.producer");
+
+            return new PulsarRawdataClient(pulsarAdmin, pulsarClient, tenant, namespace, producerName);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
