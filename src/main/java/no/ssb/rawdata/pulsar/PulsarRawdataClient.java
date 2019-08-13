@@ -125,6 +125,7 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     private PulsarRawdataMessageId getIdOfPositionUsingPulsarSQL(String topic, String position) {
+        // TODO fallback to full topic scan if Pulsar SQL is not available
         String url = "jdbc:presto://localhost:8081/pulsar";
         if (prestoDriver.get() == null) {
             try {
