@@ -13,6 +13,7 @@ import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.client.impl.BatchMessageIdImpl;
+import org.apache.pulsar.client.impl.MessageIdImpl;
 
 import java.sql.Connection;
 import java.sql.Driver;
@@ -82,6 +83,47 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     PulsarRawdataMessageId findMessageId(String topic, String position) {
+        /*
+         * Check first to see if this could be the very last message in the topic, which is not visible to Pulsar SQL
+         * due to an open bug: https://github.com/apache/pulsar/issues/3828
+         */
+        PulsarRawdataMessageId lastMessageId = getLastMessageIdUsingAdminClientAndConsumerSeek(toQualifiedPulsarTopic(topic), position);
+        if (lastMessageId != null && position.equals(lastMessageId.getPosition())) {
+            return lastMessageId; // last message matches, no need to run Pulsar SQL
+        }
+
+        return getIdOfPositionUsingPulsarSQL(topic, position);
+    }
+
+    private PulsarRawdataMessageId getLastMessageIdUsingAdminClientAndConsumerSeek(String topic, String position) {
+        try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+                .topic(topic)
+                .subscriptionType(SubscriptionType.Exclusive)
+                .subscriptionName("rawdata-findMessageId-" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionInitialPosition(SubscriptionInitialPosition.Latest)
+                .subscribe()) {
+            try {
+                MessageIdImpl lastMessageId = (MessageIdImpl) admin.topics().getLastMessageId(topic);
+                if (lastMessageId.getEntryId() == -1) {
+                    return null; // topic is empty
+                }
+                consumer.seek(lastMessageId);
+                Message<PulsarRawdataMessageContent> message = consumer.receive(3, TimeUnit.SECONDS);
+                if (message == null) {
+                    return null; // not found
+                }
+                return new PulsarRawdataMessageId(message.getMessageId(), position); // found as last message in topic
+            } catch (PulsarAdminException e) {
+                throw new RuntimeException(e);
+            } finally {
+                consumer.unsubscribe();
+            }
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private PulsarRawdataMessageId getIdOfPositionUsingPulsarSQL(String topic, String position) {
         String url = "jdbc:presto://localhost:8081/pulsar";
         if (prestoDriver.get() == null) {
             try {
@@ -107,31 +149,7 @@ class PulsarRawdataClient implements RawdataClient {
                 MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
                 return new PulsarRawdataMessageId(id, position);
             }
-            /*
-             * Not found using Pulsar SQL. Check to see if this could be the very last message in the topic, which is
-             * not visible to Pulsar SQL due to an open bug: https://github.com/apache/pulsar/issues/3828
-             */
-            try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
-                    .topic(toQualifiedPulsarTopic(topic))
-                    .subscriptionType(SubscriptionType.Exclusive)
-                    .subscriptionName("rawdata-findMessageId-" + new Random().nextInt(Integer.MAX_VALUE))
-                    .subscriptionInitialPosition(SubscriptionInitialPosition.Latest)
-                    .subscribe()) {
-                try {
-                    consumer.seek(admin.topics().getLastMessageId(toQualifiedPulsarTopic(topic)));
-                    Message<PulsarRawdataMessageContent> message = consumer.receive(3, TimeUnit.SECONDS);
-                    if (message == null) {
-                        return null; // not found
-                    }
-                    return new PulsarRawdataMessageId(message.getMessageId(), position); // found as last message in topic
-                } catch (PulsarAdminException e) {
-                    throw new RuntimeException(e);
-                } finally {
-                    consumer.unsubscribe();
-                }
-            } catch (PulsarClientException e) {
-                throw new RuntimeException(e);
-            }
+            return null; // not found
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
