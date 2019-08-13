@@ -1,42 +1,45 @@
 package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataConsumer;
+import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.Message;
-import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
-import org.apache.pulsar.client.api.Reader;
-import org.apache.pulsar.client.api.ReaderBuilder;
 import org.apache.pulsar.client.api.Schema;
+import org.apache.pulsar.client.api.SubscriptionInitialPosition;
+import org.apache.pulsar.client.api.SubscriptionType;
 
 import java.io.IOException;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 class PulsarRawdataConsumer implements RawdataConsumer {
 
-    final Reader<PulsarRawdataMessageContent> reader;
+    final Consumer<PulsarRawdataMessageContent> consumer;
 
     public PulsarRawdataConsumer(PulsarClient client, String topic, PulsarRawdataMessageId initialPosition, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
-        ReaderBuilder<PulsarRawdataMessageContent> builder = client.newReader(schema)
-                .topic(topic);
-        if (initialPosition == null) {
-            builder.startMessageId(MessageId.earliest);
-        } else {
-            builder.startMessageId(initialPosition.messageId);
+        // TODO Go back to using reader once bug has been fixed: https://github.com/apache/pulsar/issues/4941
+        this.consumer = client.newConsumer(schema)
+                .topic(topic)
+                .subscriptionType(SubscriptionType.Exclusive)
+                .subscriptionName("rawdata-m" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                .subscribe();
+        if (initialPosition != null) {
+            consumer.seek(initialPosition.messageId);
         }
-        this.reader = builder.create();
     }
 
     @Override
     public String topic() {
-        return reader.getTopic();
+        return consumer.getTopic();
     }
 
     @Override
     public PulsarRawdataMessageContent receive(int timeout, TimeUnit unit) {
         try {
-            Message<PulsarRawdataMessageContent> message = reader.readNext(timeout, unit);
+            Message<PulsarRawdataMessageContent> message = consumer.receive(timeout, unit);
             if (message == null) {
                 return null;
             }
@@ -49,25 +52,26 @@ class PulsarRawdataConsumer implements RawdataConsumer {
 
     @Override
     public CompletableFuture<PulsarRawdataMessageContent> receiveAsync() {
-        return reader.readNextAsync().thenApply(m -> m.getValue());
+        return consumer.receiveAsync().thenApply(m -> m.getValue());
     }
 
     @Override
     public String toString() {
         return "PulsarRawdataConsumer{" +
-                "reader=" + reader +
+                "consumer=" + consumer +
                 '}';
     }
 
     @Override
     public boolean isClosed() {
-        return !reader.isConnected();
+        return !consumer.isConnected();
     }
 
     @Override
     public void close() {
         try {
-            reader.close();
+            consumer.unsubscribe();
+            consumer.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
