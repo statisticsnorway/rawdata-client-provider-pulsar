@@ -75,7 +75,7 @@ class PulsarRawdataProducer implements RawdataProducer {
                 } catch (PulsarAdminException e) {
                     throw new RuntimeException(e);
                 } finally {
-                    //consumer.unsubscribe();
+                    consumer.unsubscribe();
                 }
             }
         } catch (PulsarClientException e) {
