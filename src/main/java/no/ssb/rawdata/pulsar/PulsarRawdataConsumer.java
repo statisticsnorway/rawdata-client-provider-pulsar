@@ -25,9 +25,15 @@ class PulsarRawdataConsumer implements RawdataConsumer {
                 .subscriptionType(SubscriptionType.Exclusive)
                 .subscriptionName("rawdata-m" + new Random().nextInt(Integer.MAX_VALUE))
                 .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                .acknowledgmentGroupTime(5, TimeUnit.SECONDS)
                 .subscribe();
         if (initialPosition != null) {
             consumer.seek(initialPosition.messageId);
+            Message<PulsarRawdataMessageContent> message = consumer.receive(30, TimeUnit.SECONDS);
+            if (message == null) {
+                throw new RuntimeException("Unable to find message that seek was set to");
+            }
+            consumer.acknowledge(message.getMessageId()); // auto-acknowledge
         }
     }
 
@@ -43,6 +49,7 @@ class PulsarRawdataConsumer implements RawdataConsumer {
             if (message == null) {
                 return null;
             }
+            consumer.acknowledge(message.getMessageId()); // auto-acknowledge
             return message.getValue();
         } catch (PulsarClientException e) {
             // TODO wrap consumer closed exception in a RawdataClosedException
@@ -52,7 +59,14 @@ class PulsarRawdataConsumer implements RawdataConsumer {
 
     @Override
     public CompletableFuture<PulsarRawdataMessageContent> receiveAsync() {
-        return consumer.receiveAsync().thenApply(m -> m.getValue());
+        return consumer.receiveAsync().thenApply(m -> {
+            try {
+                consumer.acknowledge(m.getMessageId()); // auto-acknowledge
+            } catch (PulsarClientException e) {
+                throw new RuntimeException(e);
+            }
+            return m.getValue();
+        });
     }
 
     @Override

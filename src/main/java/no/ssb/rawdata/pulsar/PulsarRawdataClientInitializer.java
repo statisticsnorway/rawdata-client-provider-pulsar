@@ -3,8 +3,10 @@ package no.ssb.rawdata.pulsar;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.service.provider.api.ProviderName;
+import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
+import org.apache.pulsar.client.impl.auth.AuthenticationDisabled;
 
 import java.util.Map;
 import java.util.Set;
@@ -20,7 +22,8 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
     @Override
     public Set<String> configurationKeys() {
         return Set.of(
-                "pulsar.service.url",
+                "pulsar.admin.url",
+                "pulsar.broker.url",
                 "pulsar.tenant",
                 "pulsar.namespace",
                 "pulsar.producer"
@@ -30,7 +33,7 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
     @Override
     public RawdataClient initialize(Map<String, String> configuration) {
         try {
-            String serviceUrl = configuration.get("pulsar.service.url");
+            String serviceUrl = configuration.get("pulsar.broker.url");
             PulsarClient pulsarClient = PulsarClient.builder()
                     .serviceUrl(serviceUrl)
                     .build();
@@ -38,7 +41,12 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
             String namespace = configuration.get("pulsar.namespace");
             String producerName = configuration.get("pulsar.producer");
 
-            return new PulsarRawdataClient(pulsarClient, tenant, namespace, producerName);
+            PulsarAdmin admin = PulsarAdmin.builder()
+                    .serviceHttpUrl(configuration.get("pulsar.admin.url"))
+                    .authentication(new AuthenticationDisabled())
+                    .build();
+
+            return new PulsarRawdataClient(admin, pulsarClient, tenant, namespace, producerName);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }

@@ -37,7 +37,8 @@ public class PulsarRawdataClientTck {
     @BeforeMethod
     public void createRawdataClient() throws PulsarAdminException, PulsarClientException {
         Map<String, String> configuration = Map.of(
-                "pulsar.service.url", "pulsar://localhost:6650",
+                "pulsar.admin.url", "http://localhost:8080",
+                "pulsar.broker.url", "pulsar://localhost:6650",
                 "pulsar.tenant", "test",
                 "pulsar.namespace", "rawdata",
                 "pulsar.producer", "tck-testng"
@@ -45,7 +46,7 @@ public class PulsarRawdataClientTck {
         client = ProviderConfigurator.configure(configuration, "pulsar", RawdataClientInitializer.class);
 
         try (PulsarAdmin admin = PulsarAdmin.builder()
-                .serviceHttpUrl("http://localhost:8080")
+                .serviceHttpUrl(configuration.get("pulsar.admin.url"))
                 .authentication(new AuthenticationDisabled())
                 .build()) {
 
