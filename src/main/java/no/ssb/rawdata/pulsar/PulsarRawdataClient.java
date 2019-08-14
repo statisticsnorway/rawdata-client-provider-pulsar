@@ -14,6 +14,8 @@ import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.client.impl.BatchMessageIdImpl;
 import org.apache.pulsar.client.impl.MessageIdImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.Driver;
@@ -32,6 +34,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 class PulsarRawdataClient implements RawdataClient {
+
+    private static Logger log = LoggerFactory.getLogger(PulsarRawdataClient.class);
 
     static final Schema<PulsarRawdataMessageContent> schema = Schema.AVRO(PulsarRawdataMessageContent.class);
     static final AtomicReference<Driver> prestoDriver = new AtomicReference<>();
@@ -100,11 +104,13 @@ class PulsarRawdataClient implements RawdataClient {
             try {
                 return getIdOfPositionUsingPulsarSQL(topic, position);
             } catch (Error | RuntimeException e) {
-                // ignore
-                System.out.format("Error while attempting to use Pulsar SQL to get the message-id of message on topic '%s' with position '%s'%n", topic, position);
-                e.printStackTrace(System.out);
+                String msg = String.format("Error while attempting to use Pulsar SQL to get the message-id of message on topic '%s' with position '%s'. Falling back to full topic scan", topic, position);
+                if (log.isDebugEnabled()) {
+                    log.debug(msg, e);
+                } else {
+                    log.info(msg);
+                }
             }
-            System.out.println("Falling back to full topic scan");
         }
 
         return fullTopicScanForMessageId(toQualifiedPulsarTopic(topic), position);

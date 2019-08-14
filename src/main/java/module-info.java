@@ -6,6 +6,7 @@ module no.ssb.rawdata.pulsar {
     requires pulsar.client.api;
     requires pulsar.client.admin;
     requires java.sql;
+    requires org.slf4j;
 
     provides RawdataClientInitializer with PulsarRawdataClientInitializer;
 }
