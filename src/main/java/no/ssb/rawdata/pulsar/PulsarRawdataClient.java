@@ -39,8 +39,7 @@ class PulsarRawdataClient implements RawdataClient {
     final PulsarAdmin admin;
     final PulsarClient client;
     final String prestoUrl;
-    final String prestoUsername;
-    final String prestoPassword;
+    final Properties prestoJdbcProperties;
     final String tenant;
     final String namespace;
     final String producerName;
@@ -49,12 +48,11 @@ class PulsarRawdataClient implements RawdataClient {
     final List<PulsarRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<PulsarRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String prestoUrl, String prestoUsername, String prestoPassword, String tenant, String namespace, String producerName) {
+    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String prestoUrl, Properties prestoJdbcProperties, String tenant, String namespace, String producerName) {
         this.admin = admin;
         this.client = client;
         this.prestoUrl = prestoUrl;
-        this.prestoUsername = prestoUsername;
-        this.prestoPassword = prestoPassword;
+        this.prestoJdbcProperties = prestoJdbcProperties;
         this.tenant = tenant;
         this.namespace = namespace;
         this.producerName = producerName;
@@ -182,12 +180,7 @@ class PulsarRawdataClient implements RawdataClient {
                 throw new RuntimeException(e);
             }
         }
-        Properties properties = new Properties();
-        properties.setProperty("user", prestoUsername);
-        if (prestoPassword != null) {
-            properties.setProperty("password", prestoPassword);
-        }
-        try (Connection connection = prestoDriver.get().connect(prestoUrl, properties)) {
+        try (Connection connection = prestoDriver.get().connect(prestoUrl, prestoJdbcProperties)) {
             String queryFormat = "SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE position = ?";
             PreparedStatement ps = connection.prepareStatement(String.format(queryFormat, tenant, namespace, topic));
             ps.setString(1, position);

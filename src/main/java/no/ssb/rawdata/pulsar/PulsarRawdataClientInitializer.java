@@ -9,6 +9,7 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.impl.auth.AuthenticationDisabled;
 
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 @ProviderName("pulsar")
@@ -46,11 +47,18 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
             String namespace = configuration.get("pulsar.namespace");
             String producerName = configuration.get("pulsar.producer");
 
+            Properties prestoJdbcProperties = new Properties();
             String prestoUrl = configuration.get("pulsar.presto.url");
-            String prestoUsername = configuration.getOrDefault("pulsar.presto.username", "root");
-            String prestoPassword = configuration.get("pulsar.presto.password");
+            for (String key : configuration.keySet()) {
+                if (key.equals("pulsar.presto.url")) {
+                    continue;
+                }
+                if (key.startsWith("pulsar.presto.")) {
+                    prestoJdbcProperties.put(key.substring("pulsar.presto.".length()), configuration.get(key));
+                }
+            }
 
-            return new PulsarRawdataClient(pulsarAdmin, pulsarClient, prestoUrl, prestoUsername, prestoPassword, tenant, namespace, producerName);
+            return new PulsarRawdataClient(pulsarAdmin, pulsarClient, prestoUrl, prestoJdbcProperties, tenant, namespace, producerName);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
