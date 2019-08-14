@@ -41,7 +41,9 @@ public class PulsarRawdataClientTck {
                 "pulsar.broker.url", "pulsar://localhost:6650",
                 "pulsar.tenant", "test",
                 "pulsar.namespace", "rawdata",
-                "pulsar.producer", "tck-testng"
+                "pulsar.producer", "tck-testng",
+                "pulsar.presto.url", "jdbc:presto://localhost:8081",
+                "pulsar.presto.username", "root"
         );
         client = ProviderConfigurator.configure(configuration, "pulsar", RawdataClientInitializer.class);
 

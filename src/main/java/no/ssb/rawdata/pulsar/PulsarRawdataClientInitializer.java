@@ -46,7 +46,11 @@ public class PulsarRawdataClientInitializer implements RawdataClientInitializer 
             String namespace = configuration.get("pulsar.namespace");
             String producerName = configuration.get("pulsar.producer");
 
-            return new PulsarRawdataClient(pulsarAdmin, pulsarClient, tenant, namespace, producerName);
+            String prestoUrl = configuration.get("pulsar.presto.url");
+            String prestoUsername = configuration.getOrDefault("pulsar.presto.username", "root");
+            String prestoPassword = configuration.get("pulsar.presto.password");
+
+            return new PulsarRawdataClient(pulsarAdmin, pulsarClient, prestoUrl, prestoUsername, prestoPassword, tenant, namespace, producerName);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }

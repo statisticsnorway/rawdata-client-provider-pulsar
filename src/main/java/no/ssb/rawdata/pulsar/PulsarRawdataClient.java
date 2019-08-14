@@ -34,9 +34,13 @@ import java.util.regex.Pattern;
 class PulsarRawdataClient implements RawdataClient {
 
     static final Schema<PulsarRawdataMessageContent> schema = Schema.AVRO(PulsarRawdataMessageContent.class);
+    static final AtomicReference<Driver> prestoDriver = new AtomicReference<>();
 
     final PulsarAdmin admin;
     final PulsarClient client;
+    final String prestoUrl;
+    final String prestoUsername;
+    final String prestoPassword;
     final String tenant;
     final String namespace;
     final String producerName;
@@ -44,11 +48,13 @@ class PulsarRawdataClient implements RawdataClient {
     final AtomicBoolean closed = new AtomicBoolean(false);
     final List<PulsarRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<PulsarRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
-    final AtomicReference<Driver> prestoDriver = new AtomicReference<>();
 
-    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String tenant, String namespace, String producerName) {
+    PulsarRawdataClient(PulsarAdmin admin, PulsarClient client, String prestoUrl, String prestoUsername, String prestoPassword, String tenant, String namespace, String producerName) {
         this.admin = admin;
         this.client = client;
+        this.prestoUrl = prestoUrl;
+        this.prestoUsername = prestoUsername;
+        this.prestoPassword = prestoPassword;
         this.tenant = tenant;
         this.namespace = namespace;
         this.producerName = producerName;
@@ -92,14 +98,25 @@ class PulsarRawdataClient implements RawdataClient {
             return lastMessageId; // last message matches, no need to run Pulsar SQL
         }
 
-        return getIdOfPositionUsingPulsarSQL(topic, position);
+        if (prestoUrl != null) {
+            try {
+                return getIdOfPositionUsingPulsarSQL(topic, position);
+            } catch (Error | RuntimeException e) {
+                // ignore
+                System.out.format("Error while attempting to use Pulsar SQL to get the message-id of message on topic '%s' with position '%s'%n", topic, position);
+                e.printStackTrace(System.out);
+            }
+            System.out.println("Falling back to full topic scan");
+        }
+
+        return fullTopicScanForMessageId(toQualifiedPulsarTopic(topic), position);
     }
 
     private PulsarRawdataMessageId getLastMessageIdUsingAdminClientAndConsumerSeek(String topic) {
         try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
                 .topic(topic)
                 .subscriptionType(SubscriptionType.Exclusive)
-                .subscriptionName("rawdata-findMessageId-" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionName("get-last-message-" + new Random().nextInt(Integer.MAX_VALUE))
                 .subscriptionInitialPosition(SubscriptionInitialPosition.Latest)
                 .subscribe()) {
             try {
@@ -124,20 +141,55 @@ class PulsarRawdataClient implements RawdataClient {
         }
     }
 
+    private PulsarRawdataMessageId fullTopicScanForMessageId(String topic, String position) {
+        try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+                .topic(topic)
+                .subscriptionType(SubscriptionType.Exclusive)
+                .subscriptionName("scan-position-" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                .subscribe()) {
+            try {
+                int i = 0;
+                Message<PulsarRawdataMessageContent> message;
+                MessageId lastMessageId = admin.topics().getLastMessageId(topic);
+                while ((message = consumer.receive(30, TimeUnit.SECONDS)) != null) {
+                    if (position.equals(message.getValue().position())) {
+                        return new PulsarRawdataMessageId(message.getMessageId(), position);
+                    }
+                    if (lastMessageId.compareTo(message.getMessageId()) == 0) {
+                        return null; // last message of topic, return not found
+                    }
+                    if ((++i % 10000) == 0) {
+                        consumer.acknowledgeCumulative(message.getMessageId());
+                    }
+                }
+                return null; // default not found
+            } finally {
+                consumer.unsubscribe();
+            }
+        } catch (PulsarAdminException e) {
+            throw new RuntimeException(e);
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private PulsarRawdataMessageId getIdOfPositionUsingPulsarSQL(String topic, String position) {
-        // TODO fallback to full topic scan if Pulsar SQL is not available
-        String url = "jdbc:presto://localhost:8081/pulsar";
         if (prestoDriver.get() == null) {
             try {
-                prestoDriver.set(DriverManager.getDriver(url));
+                prestoDriver.set(DriverManager.getDriver(prestoUrl));
             } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
         }
         Properties properties = new Properties();
-        properties.setProperty("user", "root");
-        try (Connection connection = prestoDriver.get().connect(url, properties)) {
-            PreparedStatement ps = connection.prepareStatement(String.format("SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE position = ?", tenant, namespace, topic));
+        properties.setProperty("user", prestoUsername);
+        if (prestoPassword != null) {
+            properties.setProperty("password", prestoPassword);
+        }
+        try (Connection connection = prestoDriver.get().connect(prestoUrl, properties)) {
+            String queryFormat = "SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE position = ?";
+            PreparedStatement ps = connection.prepareStatement(String.format(queryFormat, tenant, namespace, topic));
             ps.setString(1, position);
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
