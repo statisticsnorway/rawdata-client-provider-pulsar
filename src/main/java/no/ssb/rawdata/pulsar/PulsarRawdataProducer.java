@@ -61,7 +61,7 @@ class PulsarRawdataProducer implements RawdataProducer {
                     .topic(topic)
                     .subscriptionType(SubscriptionType.Exclusive)
                     .consumerName(producerName)
-                    .subscriptionName("last-position-master-" + new Random().nextInt(Integer.MAX_VALUE))
+                    .subscriptionName("last-position-" + new Random().nextInt(Integer.MAX_VALUE))
                     .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
                     .subscribe()) {
                 try {

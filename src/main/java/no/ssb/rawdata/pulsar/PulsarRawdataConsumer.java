@@ -23,7 +23,7 @@ class PulsarRawdataConsumer implements RawdataConsumer {
         this.consumer = client.newConsumer(schema)
                 .topic(topic)
                 .subscriptionType(SubscriptionType.Exclusive)
-                .subscriptionName("rawdata-m" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionName("rawdata-consumer-" + new Random().nextInt(Integer.MAX_VALUE))
                 .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
                 .acknowledgmentGroupTime(5, TimeUnit.SECONDS)
                 .subscribe();
