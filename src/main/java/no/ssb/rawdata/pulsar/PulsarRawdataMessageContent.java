@@ -68,6 +68,9 @@ public class PulsarRawdataMessageContent implements RawdataMessage {
 
     private boolean allArraysEquals(PulsarRawdataMessageContent that) {
         for (Map.Entry<String, byte[]> entry : data.entrySet()) {
+            if (!that.data.containsKey(entry.getKey())) {
+                return false;
+            }
             if (!Arrays.equals(entry.getValue(), that.data.get(entry.getKey()))) {
                 return false;
             }
