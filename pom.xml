@@ -53,7 +53,7 @@
         <dependency>
             <groupId>no.ssb.rawdata</groupId>
             <artifactId>rawdata-client-api</artifactId>
-            <version>0.17</version>
+            <version>0.18-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.spi</groupId>

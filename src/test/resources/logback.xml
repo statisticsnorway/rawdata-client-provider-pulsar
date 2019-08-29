@@ -11,8 +11,8 @@
     </appender>
 
     <logger name="org.apache.pulsar.client.impl" level="WARN"/>
-    <logger name="org.apache.pulsar.client.impl.ClientCnx" level="ERROR"/>
-    <logger name="org.apache.pulsar.client.impl.ConsumerImpl" level="ERROR"/>
+    <logger name="org.apache.pulsar.client.impl.ClientCnx" level="TRACE"/>
+    <logger name="org.apache.pulsar.client.impl.ConsumerImpl" level="TRACE"/>
 
     <logger name="no.ssb.rawdata.pulsar" level="INFO"/>
 

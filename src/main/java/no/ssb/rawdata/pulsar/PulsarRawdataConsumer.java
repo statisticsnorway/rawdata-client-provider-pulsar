@@ -70,6 +70,15 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     }
 
     @Override
+    public void seek(long timestamp) {
+        try {
+            consumer.seek(timestamp);
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public String toString() {
         return "PulsarRawdataConsumer{" +
                 "consumer=" + consumer +

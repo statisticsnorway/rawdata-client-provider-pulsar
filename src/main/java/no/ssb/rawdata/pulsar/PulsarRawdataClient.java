@@ -1,6 +1,7 @@
 package no.ssb.rawdata.pulsar;
 
 import no.ssb.rawdata.api.RawdataClient;
+import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
@@ -88,6 +89,36 @@ class PulsarRawdataClient implements RawdataClient {
         }
         consumers.add(consumer);
         return consumer;
+    }
+
+    @Override
+    public String lastPosition(String topic) throws RawdataClosedException {
+        try {
+            String qualifiedTopic = toQualifiedPulsarTopic(topic);
+            try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+                    .topic(qualifiedTopic)
+                    .subscriptionType(SubscriptionType.Exclusive)
+                    .consumerName(producerName)
+                    .subscriptionName("last-position-" + new Random().nextInt(Integer.MAX_VALUE))
+                    .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                    .subscribe()) {
+                try {
+                    MessageIdImpl lastMessageId = (MessageIdImpl) admin.topics().getLastMessageId(qualifiedTopic);
+                    if (lastMessageId.getEntryId() == -1) {
+                        return null; // topic is empty
+                    }
+                    consumer.seek(lastMessageId);
+                    Message<PulsarRawdataMessageContent> message = consumer.receive(30, TimeUnit.SECONDS);
+                    return message.getValue().position();
+                } catch (PulsarAdminException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    consumer.unsubscribe();
+                }
+            }
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     PulsarRawdataMessageId findMessageId(String topic, String position) {
