@@ -3,6 +3,7 @@ package no.ssb.rawdata.pulsar;
 import no.ssb.rawdata.api.RawdataConsumer;
 import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.Message;
+import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.Schema;
@@ -16,9 +17,9 @@ import java.util.concurrent.TimeUnit;
 
 class PulsarRawdataConsumer implements RawdataConsumer {
 
-    final Consumer<PulsarRawdataMessageContent> consumer;
+    final Consumer<PulsarRawdataMessage> consumer;
 
-    public PulsarRawdataConsumer(PulsarClient client, String topic, PulsarRawdataMessageId initialPosition, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
+    public PulsarRawdataConsumer(PulsarClient client, String topic, MessageId initialMessageId, boolean inclusive, Schema<PulsarRawdataMessage> schema) throws PulsarClientException {
         // TODO Go back to using reader once bug has been fixed: https://github.com/apache/pulsar/issues/4941
         this.consumer = client.newConsumer(schema)
                 .topic(topic)
@@ -27,13 +28,15 @@ class PulsarRawdataConsumer implements RawdataConsumer {
                 .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
                 .acknowledgmentGroupTime(5, TimeUnit.SECONDS)
                 .subscribe();
-        if (initialPosition != null) {
-            consumer.seek(initialPosition.messageId);
-            Message<PulsarRawdataMessageContent> message = consumer.receive(30, TimeUnit.SECONDS);
-            if (message == null) {
-                throw new RuntimeException("Unable to find message that seek was set to");
+        if (initialMessageId != null) {
+            consumer.seek(initialMessageId);
+            if (!inclusive) {
+                Message<PulsarRawdataMessage> message = consumer.receive(30, TimeUnit.SECONDS);
+                if (message == null) {
+                    throw new RuntimeException("Unable to find message that seek was set to");
+                }
+                consumer.acknowledge(message.getMessageId()); // auto-acknowledge
             }
-            consumer.acknowledge(message.getMessageId()); // auto-acknowledge
         }
     }
 
@@ -43,14 +46,15 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     }
 
     @Override
-    public PulsarRawdataMessageContent receive(int timeout, TimeUnit unit) {
+    public PulsarRawdataMessage receive(int timeout, TimeUnit unit) {
         try {
-            Message<PulsarRawdataMessageContent> message = consumer.receive(timeout, unit);
+            Message<PulsarRawdataMessage> message = consumer.receive(timeout, unit);
             if (message == null) {
                 return null;
             }
             consumer.acknowledge(message.getMessageId()); // auto-acknowledge
-            return message.getValue();
+            PulsarRawdataMessage rawdataMessage = message.getValue();
+            return rawdataMessage;
         } catch (PulsarClientException e) {
             // TODO wrap consumer closed exception in a RawdataClosedException
             throw new RuntimeException(e);
@@ -58,7 +62,7 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     }
 
     @Override
-    public CompletableFuture<PulsarRawdataMessageContent> receiveAsync() {
+    public CompletableFuture<PulsarRawdataMessage> receiveAsync() {
         return consumer.receiveAsync().thenApply(m -> {
             try {
                 consumer.acknowledge(m.getMessageId()); // auto-acknowledge
@@ -73,7 +77,10 @@ class PulsarRawdataConsumer implements RawdataConsumer {
     public void seek(long timestamp) {
         try {
             consumer.seek(timestamp);
+            Thread.sleep(500); // Workaround for https://github.com/apache/pulsar/issues/5073
         } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
     }

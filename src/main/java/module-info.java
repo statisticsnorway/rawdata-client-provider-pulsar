@@ -7,6 +7,7 @@ module no.ssb.rawdata.pulsar {
     requires pulsar.client.admin;
     requires java.sql;
     requires org.slf4j;
+    requires de.huxhorn.sulky.ulid;
 
     provides RawdataClientInitializer with PulsarRawdataClientInitializer;
 }

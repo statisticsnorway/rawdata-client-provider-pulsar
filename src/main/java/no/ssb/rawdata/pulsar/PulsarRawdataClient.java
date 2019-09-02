@@ -1,8 +1,10 @@
 package no.ssb.rawdata.pulsar;
 
+import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
+import no.ssb.rawdata.api.RawdataMessage;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Consumer;
@@ -31,14 +33,17 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static java.util.Optional.ofNullable;
 
 class PulsarRawdataClient implements RawdataClient {
 
     private static Logger log = LoggerFactory.getLogger(PulsarRawdataClient.class);
 
-    static final Schema<PulsarRawdataMessageContent> schema = Schema.AVRO(PulsarRawdataMessageContent.class);
+    static final Schema<PulsarRawdataMessage> schema = Schema.AVRO(PulsarRawdataMessage.class);
     static final AtomicReference<Driver> prestoDriver = new AtomicReference<>();
 
     final PulsarAdmin admin;
@@ -76,14 +81,11 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     @Override
-    public RawdataConsumer consumer(String topic, String initialPosition) {
+    public RawdataConsumer consumer(String topic, ULID.Value initialUlid, boolean inclusive) {
         PulsarRawdataConsumer consumer;
         try {
-            PulsarRawdataMessageId initialMessage = null;
-            if (initialPosition != null) {
-                initialMessage = findMessageId(topic, initialPosition);
-            }
-            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), initialMessage, schema);
+            MessageId messageId = ofNullable(initialUlid).map(ip -> findMessage(topic, ip)).map(Message::getMessageId).orElse(null);
+            consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), messageId, inclusive, schema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
@@ -92,10 +94,10 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     @Override
-    public String lastPosition(String topic) throws RawdataClosedException {
+    public RawdataMessage lastMessage(String topic) throws RawdataClosedException {
         try {
             String qualifiedTopic = toQualifiedPulsarTopic(topic);
-            try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+            try (Consumer<PulsarRawdataMessage> consumer = client.newConsumer(schema)
                     .topic(qualifiedTopic)
                     .subscriptionType(SubscriptionType.Exclusive)
                     .consumerName(producerName)
@@ -108,8 +110,11 @@ class PulsarRawdataClient implements RawdataClient {
                         return null; // topic is empty
                     }
                     consumer.seek(lastMessageId);
-                    Message<PulsarRawdataMessageContent> message = consumer.receive(30, TimeUnit.SECONDS);
-                    return message.getValue().position();
+                    Message<PulsarRawdataMessage> message = consumer.receive(30, TimeUnit.SECONDS);
+                    if (message == null) {
+                        throw new IllegalStateException(String.format("Seeked to valid message %s, but unable to read that message!", lastMessageId));
+                    }
+                    return message.getValue();
                 } catch (PulsarAdminException e) {
                     throw new RuntimeException(e);
                 } finally {
@@ -121,19 +126,30 @@ class PulsarRawdataClient implements RawdataClient {
         }
     }
 
-    PulsarRawdataMessageId findMessageId(String topic, String position) {
+    @Override
+    public ULID.Value ulidOfPosition(String topic, String position) {
+        return ofNullable(findMessage(topic, position)).map(Message::getValue).map(PulsarRawdataMessage::ulid).orElse(null);
+    }
+
+    Message<PulsarRawdataMessage> findMessage(String topic, String position) {
         /*
          * Check first to see if this could be the very last message in the topic, which is not visible to Pulsar SQL
          * due to an open bug: https://github.com/apache/pulsar/issues/3828
          */
-        PulsarRawdataMessageId lastMessageId = getLastMessageIdUsingAdminClientAndConsumerSeek(toQualifiedPulsarTopic(topic));
-        if (lastMessageId != null && position.equals(lastMessageId.getPosition())) {
-            return lastMessageId; // last message matches, no need to run Pulsar SQL
+        Message<PulsarRawdataMessage> lastMessage = getLastMessageIdUsingAdminClientAndConsumerSeek(toQualifiedPulsarTopic(topic));
+        if (lastMessage != null && position.equals(lastMessage.getValue().position)) {
+            return lastMessage; // last message matches, no need to run Pulsar SQL
         }
 
         if (prestoUrl != null) {
             try {
-                return getIdOfPositionUsingPulsarSQL(topic, position);
+                MessageId matchingMessageId = getIdOfPositionUsingPulsarSQL(topic, position);
+                if (matchingMessageId == null) {
+                    return null;
+                }
+
+                return getMessageOf(topic, matchingMessageId);
+
             } catch (Error | RuntimeException e) {
                 String msg = String.format("Error while attempting to use Pulsar SQL to get the message-id of message on topic '%s' with position '%s'. Falling back to full topic scan", topic, position);
                 if (log.isDebugEnabled()) {
@@ -144,11 +160,65 @@ class PulsarRawdataClient implements RawdataClient {
             }
         }
 
-        return fullTopicScanForMessageId(toQualifiedPulsarTopic(topic), position);
+        return fullTopicScanFor(toQualifiedPulsarTopic(topic), message -> position.equals(message.getValue().position));
     }
 
-    private PulsarRawdataMessageId getLastMessageIdUsingAdminClientAndConsumerSeek(String topic) {
-        try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+    Message<PulsarRawdataMessage> findMessage(String topic, ULID.Value ulid) {
+        /*
+         * Check first to see if this could be the very last message in the topic, which is not visible to Pulsar SQL
+         * due to an open bug: https://github.com/apache/pulsar/issues/3828
+         */
+        Message<PulsarRawdataMessage> lastMessage = getLastMessageIdUsingAdminClientAndConsumerSeek(toQualifiedPulsarTopic(topic));
+        if (lastMessage != null && ulid.equals(lastMessage.getValue().ulid())) {
+            return lastMessage; // last message matches, no need to run Pulsar SQL
+        }
+
+        if (prestoUrl != null) {
+            try {
+                MessageId matchingMessageId = getIdOfUlidUsingPulsarSQL(topic, ulid);
+                if (matchingMessageId == null) {
+                    return null;
+                }
+
+                return getMessageOf(topic, matchingMessageId);
+
+            } catch (Error | RuntimeException e) {
+                String msg = String.format("Error while attempting to use Pulsar SQL to get the message-id of message on topic '%s' with ulid '%s'. Falling back to full topic scan", topic, ulid);
+                if (log.isDebugEnabled()) {
+                    log.debug(msg, e);
+                } else {
+                    log.info(msg);
+                }
+            }
+        }
+
+        return fullTopicScanFor(toQualifiedPulsarTopic(topic), message -> ulid.equals(message.getValue().ulid()));
+    }
+
+    private Message<PulsarRawdataMessage> getMessageOf(String topic, MessageId matchingMessageId) {
+        try (Consumer<PulsarRawdataMessage> consumer = client.newConsumer(schema)
+                .topic(topic)
+                .subscriptionType(SubscriptionType.Exclusive)
+                .subscriptionName("get-specific-message-" + new Random().nextInt(Integer.MAX_VALUE))
+                .subscriptionInitialPosition(SubscriptionInitialPosition.Earliest)
+                .subscribe()) {
+            try {
+                consumer.seek(matchingMessageId);
+                Message<PulsarRawdataMessage> message = consumer.receive(3, TimeUnit.SECONDS);
+                if (message == null) {
+                    return null; // not found
+                }
+                return message; // found
+            } finally {
+                consumer.unsubscribe();
+            }
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private Message<PulsarRawdataMessage> getLastMessageIdUsingAdminClientAndConsumerSeek(String topic) {
+        try (Consumer<PulsarRawdataMessage> consumer = client.newConsumer(schema)
                 .topic(topic)
                 .subscriptionType(SubscriptionType.Exclusive)
                 .subscriptionName("get-last-message-" + new Random().nextInt(Integer.MAX_VALUE))
@@ -160,12 +230,11 @@ class PulsarRawdataClient implements RawdataClient {
                     return null; // topic is empty
                 }
                 consumer.seek(lastMessageId);
-                Message<PulsarRawdataMessageContent> message = consumer.receive(3, TimeUnit.SECONDS);
+                Message<PulsarRawdataMessage> message = consumer.receive(3, TimeUnit.SECONDS);
                 if (message == null) {
                     return null; // not found
                 }
-                PulsarRawdataMessageContent value = message.getValue();
-                return new PulsarRawdataMessageId(message.getMessageId(), value.position()); // found as last message in topic
+                return message; // found as last message in topic
             } catch (PulsarAdminException e) {
                 throw new RuntimeException(e);
             } finally {
@@ -176,8 +245,8 @@ class PulsarRawdataClient implements RawdataClient {
         }
     }
 
-    private PulsarRawdataMessageId fullTopicScanForMessageId(String topic, String position) {
-        try (Consumer<PulsarRawdataMessageContent> consumer = client.newConsumer(schema)
+    private Message<PulsarRawdataMessage> fullTopicScanFor(String topic, Predicate<Message<PulsarRawdataMessage>> predicate) {
+        try (Consumer<PulsarRawdataMessage> consumer = client.newConsumer(schema)
                 .topic(topic)
                 .subscriptionType(SubscriptionType.Exclusive)
                 .subscriptionName("scan-position-" + new Random().nextInt(Integer.MAX_VALUE))
@@ -185,11 +254,11 @@ class PulsarRawdataClient implements RawdataClient {
                 .subscribe()) {
             try {
                 int i = 0;
-                Message<PulsarRawdataMessageContent> message;
+                Message<PulsarRawdataMessage> message;
                 MessageId lastMessageId = admin.topics().getLastMessageId(topic);
                 while ((message = consumer.receive(30, TimeUnit.SECONDS)) != null) {
-                    if (position.equals(message.getValue().position())) {
-                        return new PulsarRawdataMessageId(message.getMessageId(), position);
+                    if (predicate.test(message)) {
+                        return message;
                     }
                     if (lastMessageId.compareTo(message.getMessageId()) == 0) {
                         return null; // last message of topic, return not found
@@ -209,7 +278,7 @@ class PulsarRawdataClient implements RawdataClient {
         }
     }
 
-    private PulsarRawdataMessageId getIdOfPositionUsingPulsarSQL(String topic, String position) {
+    private MessageId getIdOfPositionUsingPulsarSQL(String topic, String position) {
         if (prestoDriver.get() == null) {
             try {
                 prestoDriver.set(DriverManager.getDriver(prestoUrl));
@@ -231,7 +300,38 @@ class PulsarRawdataClient implements RawdataClient {
                 long entryId = Long.parseLong(m.group("entryId"));
                 int batchIndex = Integer.parseInt(m.group("batchIndex"));
                 MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
-                return new PulsarRawdataMessageId(id, position);
+                return id;
+            }
+            return null; // not found
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private MessageId getIdOfUlidUsingPulsarSQL(String topic, ULID.Value ulid) {
+        if (prestoDriver.get() == null) {
+            try {
+                prestoDriver.set(DriverManager.getDriver(prestoUrl));
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        try (Connection connection = prestoDriver.get().connect(prestoUrl, prestoJdbcProperties)) {
+            String queryFormat = "SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE ulidMsb = ? AND ulidLsb = ?";
+            PreparedStatement ps = connection.prepareStatement(String.format(queryFormat, tenant, namespace, topic));
+            ps.setLong(1, ulid.getMostSignificantBits());
+            ps.setLong(1, ulid.getLeastSignificantBits());
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String serializedMessageId = rs.getString(1);
+                Pattern pattern = Pattern.compile("\\((?<ledgerId>[0-9]+),(?<entryId>[0-9]+),(?<batchIndex>[0-9]+)\\)");
+                Matcher m = pattern.matcher(serializedMessageId);
+                m.matches();
+                long ledgerId = Long.parseLong(m.group("ledgerId"));
+                long entryId = Long.parseLong(m.group("entryId"));
+                int batchIndex = Integer.parseInt(m.group("batchIndex"));
+                MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
+                return id;
             }
             return null; // not found
         } catch (SQLException e) {

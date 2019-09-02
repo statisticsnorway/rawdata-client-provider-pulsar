@@ -1,5 +1,6 @@
 package no.ssb.rawdata.pulsar;
 
+import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataMessage;
 import no.ssb.rawdata.api.RawdataNotBufferedException;
@@ -12,11 +13,11 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.Schema;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 class PulsarRawdataProducer implements RawdataProducer {
 
@@ -24,12 +25,15 @@ class PulsarRawdataProducer implements RawdataProducer {
     final PulsarClient client;
     final String topic;
     final String producerName;
-    final Schema<PulsarRawdataMessageContent> schema;
+    final Schema<PulsarRawdataMessage> schema;
 
-    final Producer<PulsarRawdataMessageContent> producer;
-    final Map<String, PulsarRawdataMessageContent> buffer = new ConcurrentHashMap<>();
+    final Producer<PulsarRawdataMessage> producer;
+    final Map<String, PulsarRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
 
-    PulsarRawdataProducer(PulsarAdmin admin, PulsarClient client, String topic, String producerName, Schema<PulsarRawdataMessageContent> schema) throws PulsarClientException {
+    final ULID ulid = new ULID();
+    final AtomicReference<ULID.Value> previousIdRef = new AtomicReference<>(ulid.nextValue());
+
+    PulsarRawdataProducer(PulsarAdmin admin, PulsarClient client, String topic, String producerName, Schema<PulsarRawdataMessage> schema) throws PulsarClientException {
         this.admin = admin;
         this.client = client;
         this.topic = topic;
@@ -48,38 +52,14 @@ class PulsarRawdataProducer implements RawdataProducer {
 
     @Override
     public RawdataMessage.Builder builder() throws RawdataClosedException {
-        return new RawdataMessage.Builder() {
-            String position;
-            Map<String, byte[]> data = new LinkedHashMap<>();
-
-            @Override
-            public RawdataMessage.Builder position(String position) {
-                this.position = position;
-                return this;
-            }
-
-            @Override
-            public RawdataMessage.Builder put(String key, byte[] payload) {
-                data.put(key, payload);
-                return this;
-            }
-
-            @Override
-            public PulsarRawdataMessageContent build() {
-                return new PulsarRawdataMessageContent(position, data);
-            }
-        };
+        return new PulsarRawdataMessage.Builder();
     }
 
     @Override
-    public PulsarRawdataMessageContent buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
-        return buffer(builder.build());
-    }
-
-    @Override
-    public PulsarRawdataMessageContent buffer(RawdataMessage message) throws RawdataClosedException {
-        buffer.put(message.position(), (PulsarRawdataMessageContent) message);
-        return (PulsarRawdataMessageContent) message;
+    public PulsarRawdataProducer buffer(RawdataMessage.Builder _builder) throws RawdataClosedException {
+        PulsarRawdataMessage.Builder builder = (PulsarRawdataMessage.Builder) _builder;
+        buffer.put(builder.position, builder);
+        return this;
     }
 
     @Override
@@ -90,15 +70,27 @@ class PulsarRawdataProducer implements RawdataProducer {
             }
         }
         for (String position : positions) {
-            PulsarRawdataMessageContent payload = buffer.remove(position);
+            PulsarRawdataMessage.Builder builder = buffer.remove(position);
             try {
                 producer.newMessage()
-                        .value(payload)
+                        .value(builder.ulid(getOrGenerateNextUlid(builder)).build())
                         .send();
             } catch (PulsarClientException e) {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private ULID.Value getOrGenerateNextUlid(PulsarRawdataMessage.Builder builder) {
+        ULID.Value id = builder.ulid;
+        while (id == null) {
+            ULID.Value previousUlid = previousIdRef.get();
+            ULID.Value attemptedId = RawdataProducer.nextMonotonicUlid(this.ulid, previousUlid);
+            if (previousIdRef.compareAndSet(previousUlid, attemptedId)) {
+                id = attemptedId;
+            }
+        }
+        return id;
     }
 
     @Override
@@ -110,9 +102,9 @@ class PulsarRawdataProducer implements RawdataProducer {
         }
         List<CompletableFuture<MessageId>> result = new ArrayList<>();
         for (String position : positions) {
-            PulsarRawdataMessageContent payload = buffer.remove(position);
+            PulsarRawdataMessage.Builder builder = buffer.remove(position);
             CompletableFuture<MessageId> future = producer.newMessage()
-                    .value(payload)
+                    .value(builder.build())
                     .sendAsync();
             result.add(future);
         }
