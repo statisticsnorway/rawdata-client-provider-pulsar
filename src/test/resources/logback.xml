@@ -11,10 +11,10 @@
     </appender>
 
     <logger name="org.apache.pulsar.client.impl" level="WARN"/>
-    <logger name="org.apache.pulsar.client.impl.ClientCnx" level="TRACE"/>
-    <logger name="org.apache.pulsar.client.impl.ConsumerImpl" level="TRACE"/>
+    <logger name="org.apache.pulsar.client.impl.ClientCnx" level="WARN"/>
+    <logger name="org.apache.pulsar.client.impl.ConsumerImpl" level="WARN"/>
 
-    <logger name="no.ssb.rawdata.pulsar" level="INFO"/>
+    <logger name="no.ssb.rawdata.pulsar" level="DEBUG"/>
 
     <root level="INFO">
         <appender-ref ref="STDOUT"/>

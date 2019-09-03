@@ -4,6 +4,7 @@ import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
+import no.ssb.rawdata.api.RawdataCursor;
 import no.ssb.rawdata.api.RawdataMessage;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
@@ -81,16 +82,33 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     @Override
-    public RawdataConsumer consumer(String topic, ULID.Value initialUlid, boolean inclusive) {
+    public RawdataConsumer consumer(String topic, RawdataCursor cursor) {
         PulsarRawdataConsumer consumer;
         try {
-            MessageId messageId = ofNullable(initialUlid).map(ip -> findMessage(topic, ip)).map(Message::getMessageId).orElse(null);
+            MessageId messageId = ofNullable((PulsarCursor) cursor).map(c -> c.messageId).orElse(null);
+            boolean inclusive = ofNullable((PulsarCursor) cursor).map(c -> c.inclusive).orElse(true);
             consumer = new PulsarRawdataConsumer(client, toQualifiedPulsarTopic(topic), messageId, inclusive, schema);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
         consumers.add(consumer);
         return consumer;
+    }
+
+    @Override
+    public RawdataCursor cursorOf(String topic, ULID.Value ulid, boolean inclusive) {
+        return ofNullable(findMessage(topic, ulid))
+                .map(Message::getMessageId)
+                .map(messageId -> new PulsarCursor(messageId, inclusive))
+                .orElse(null);
+    }
+
+    @Override
+    public RawdataCursor cursorOf(String topic, String position, boolean inclusive) {
+        return ofNullable(findMessage(topic, position))
+                .map(Message::getMessageId)
+                .map(messageId -> new PulsarCursor(messageId, inclusive))
+                .orElse(null);
     }
 
     @Override
@@ -124,11 +142,6 @@ class PulsarRawdataClient implements RawdataClient {
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    @Override
-    public ULID.Value ulidOfPosition(String topic, String position) {
-        return ofNullable(findMessage(topic, position)).map(Message::getValue).map(PulsarRawdataMessage::ulid).orElse(null);
     }
 
     Message<PulsarRawdataMessage> findMessage(String topic, String position) {
@@ -210,6 +223,11 @@ class PulsarRawdataClient implements RawdataClient {
                 }
                 return message; // found
             } finally {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
                 consumer.unsubscribe();
             }
         } catch (PulsarClientException e) {
@@ -292,15 +310,7 @@ class PulsarRawdataClient implements RawdataClient {
             ps.setString(1, position);
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                String serializedMessageId = rs.getString(1);
-                Pattern pattern = Pattern.compile("\\((?<ledgerId>[0-9]+),(?<entryId>[0-9]+),(?<batchIndex>[0-9]+)\\)");
-                Matcher m = pattern.matcher(serializedMessageId);
-                m.matches();
-                long ledgerId = Long.parseLong(m.group("ledgerId"));
-                long entryId = Long.parseLong(m.group("entryId"));
-                int batchIndex = Integer.parseInt(m.group("batchIndex"));
-                MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
-                return id;
+                return extractMessageId(rs);
             }
             return null; // not found
         } catch (SQLException e) {
@@ -320,23 +330,27 @@ class PulsarRawdataClient implements RawdataClient {
             String queryFormat = "SELECT __message_id__ FROM pulsar.\"%s/%s\".\"%s\" WHERE ulidMsb = ? AND ulidLsb = ?";
             PreparedStatement ps = connection.prepareStatement(String.format(queryFormat, tenant, namespace, topic));
             ps.setLong(1, ulid.getMostSignificantBits());
-            ps.setLong(1, ulid.getLeastSignificantBits());
+            ps.setLong(2, ulid.getLeastSignificantBits());
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                String serializedMessageId = rs.getString(1);
-                Pattern pattern = Pattern.compile("\\((?<ledgerId>[0-9]+),(?<entryId>[0-9]+),(?<batchIndex>[0-9]+)\\)");
-                Matcher m = pattern.matcher(serializedMessageId);
-                m.matches();
-                long ledgerId = Long.parseLong(m.group("ledgerId"));
-                long entryId = Long.parseLong(m.group("entryId"));
-                int batchIndex = Integer.parseInt(m.group("batchIndex"));
-                MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
-                return id;
+                return extractMessageId(rs);
             }
             return null; // not found
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private MessageId extractMessageId(ResultSet rs) throws SQLException {
+        String serializedMessageId = rs.getString("__message_id__");
+        Pattern pattern = Pattern.compile("\\((?<ledgerId>[0-9]+),(?<entryId>[0-9]+),(?<batchIndex>[0-9]+)\\)");
+        Matcher m = pattern.matcher(serializedMessageId);
+        m.matches();
+        long ledgerId = Long.parseLong(m.group("ledgerId"));
+        long entryId = Long.parseLong(m.group("entryId"));
+        int batchIndex = Integer.parseInt(m.group("batchIndex"));
+        MessageId id = new BatchMessageIdImpl(ledgerId, entryId, -1, batchIndex);
+        return id;
     }
 
     String toQualifiedPulsarTopic(String topicName) {
