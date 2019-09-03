@@ -27,6 +27,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
@@ -104,7 +105,8 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     @Override
-    public RawdataCursor cursorOf(String topic, String position, boolean inclusive) {
+    public RawdataCursor cursorOf(String topic, String position, boolean inclusive, long approxTimestamp, Duration tolerance) {
+        // TODO Implement optimization to search within range given by approxTimestamp and tolerance
         return ofNullable(findMessage(topic, position))
                 .map(Message::getMessageId)
                 .map(messageId -> new PulsarCursor(messageId, inclusive))
