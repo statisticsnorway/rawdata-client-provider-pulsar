@@ -6,6 +6,7 @@ import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataCursor;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataNoSuchPositionException;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Consumer;
@@ -105,12 +106,12 @@ class PulsarRawdataClient implements RawdataClient {
     }
 
     @Override
-    public RawdataCursor cursorOf(String topic, String position, boolean inclusive, long approxTimestamp, Duration tolerance) {
+    public RawdataCursor cursorOf(String topic, String position, boolean inclusive, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
         // TODO Implement optimization to search within range given by approxTimestamp and tolerance
         return ofNullable(findMessage(topic, position))
                 .map(Message::getMessageId)
                 .map(messageId -> new PulsarCursor(messageId, inclusive))
-                .orElse(null);
+                .orElseThrow(() -> new RawdataNoSuchPositionException("Unable to find position: " + position));
     }
 
     @Override

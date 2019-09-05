@@ -4,6 +4,7 @@ import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataNoSuchPositionException;
 import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
 import no.ssb.service.provider.api.ProviderConfigurator;
@@ -29,6 +30,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 
 public class PulsarRawdataClientTck {
@@ -327,13 +329,44 @@ public class PulsarRawdataClientTck {
             //consumer.seek(timestampAfterD); // Pulsar seek seems to always return the last message of the topic when timestamp is after the publish time of the last message.
             //assertNull(consumer.receive(100, TimeUnit.MILLISECONDS));
             consumer.seek(timestampBeforeD);
-            assertEquals("d", consumer.receive(100, TimeUnit.MILLISECONDS).position());
+            assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "d");
             consumer.seek(timestampBeforeB);
-            assertEquals("b", consumer.receive(100, TimeUnit.MILLISECONDS).position());
+            assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "b");
             consumer.seek(timestampBeforeC);
-            assertEquals("c", consumer.receive(100, TimeUnit.MILLISECONDS).position());
+            assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "c");
             consumer.seek(timestampBeforeA);
-            assertEquals("a", consumer.receive(100, TimeUnit.MILLISECONDS).position());
+            assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "a");
         }
+    }
+
+    @Test
+    public void thatPositionCursorOfValidPositionIsFound() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("a", "b", "c");
+        }
+        assertNotNull(client.cursorOf("the-topic", "a", true, System.currentTimeMillis(), Duration.ofMinutes(1)));
+        assertNotNull(client.cursorOf("the-topic", "b", true, System.currentTimeMillis(), Duration.ofMinutes(1)));
+        assertNotNull(client.cursorOf("the-topic", "c", true, System.currentTimeMillis(), Duration.ofMinutes(1)));
+    }
+
+    @Test(expectedExceptions = RawdataNoSuchPositionException.class)
+    public void thatPositionCursorOfInvalidPositionIsNotFound() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("a", "b", "c");
+        }
+        assertNull(client.cursorOf("the-topic", "d", true, System.currentTimeMillis(), Duration.ofMinutes(1)));
+    }
+
+    @Test(expectedExceptions = RawdataNoSuchPositionException.class)
+    public void thatPositionCursorOfEmptyTopicIsNotFound() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+        }
+        client.cursorOf("the-topic", "d", true, System.currentTimeMillis(), Duration.ofMinutes(1));
     }
 }
