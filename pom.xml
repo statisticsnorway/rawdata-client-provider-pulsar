@@ -4,7 +4,7 @@
 
     <groupId>no.ssb.rawdata</groupId>
     <artifactId>rawdata-client-provider-pulsar</artifactId>
-    <version>0.3-SNAPSHOT</version>
+    <version>0.3</version>
     <packaging>jar</packaging>
 
     <name>Pulsar Rawdata Provider Pulsar</name>
@@ -39,7 +39,7 @@
         <developerConnection>scm:git:git@github.com:statisticsnorway/rawdata-client-provider-pulsar.git
         </developerConnection>
         <url>https://github.com/statisticsnorway/rawdata-client-provider-pulsar/tree/master</url>
-        <tag>HEAD</tag>
+        <tag>v0.3</tag>
     </scm>
 
     <distributionManagement>
