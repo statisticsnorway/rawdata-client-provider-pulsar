@@ -13,13 +13,15 @@ public class PulsarRawdataMessage implements RawdataMessage {
 
     long ulidMsb;
     long ulidLsb;
+    String orderingGroup;
+    long sequenceNumber;
     String position;
     Map<String, byte[]> data;
 
     public PulsarRawdataMessage() {
     }
 
-    public PulsarRawdataMessage(ULID.Value ulid, String position, Map<String, byte[]> data) {
+    public PulsarRawdataMessage(ULID.Value ulid, String orderingGroup, long sequenceNumber, String position, Map<String, byte[]> data) {
         if (ulid == null) {
             throw new IllegalArgumentException("ulid cannot be null");
         }
@@ -31,6 +33,8 @@ public class PulsarRawdataMessage implements RawdataMessage {
         }
         this.ulidMsb = ulid.getMostSignificantBits();
         this.ulidLsb = ulid.getLeastSignificantBits();
+        this.orderingGroup = orderingGroup;
+        this.sequenceNumber = sequenceNumber;
         this.position = position;
         this.data = data;
     }
@@ -41,8 +45,13 @@ public class PulsarRawdataMessage implements RawdataMessage {
     }
 
     @Override
+    public String orderingGroup() {
+        return orderingGroup;
+    }
+
+    @Override
     public long sequenceNumber() {
-        return 0; // non-partitioned topics already have guaranteed fifo ordering
+        return sequenceNumber;
     }
 
     @Override
@@ -115,13 +124,42 @@ public class PulsarRawdataMessage implements RawdataMessage {
 
     static class Builder implements RawdataMessage.Builder {
         ULID.Value ulid;
+        String orderingGroup;
+        long sequenceNumber = 0;
         String position;
-        Map<String, byte[]> data = new LinkedHashMap<>();
+        final Map<String, byte[]> data = new LinkedHashMap<>();
+
+        @Override
+        public synchronized RawdataMessage.Builder orderingGroup(String orderingGroup) {
+            this.orderingGroup = orderingGroup;
+            return this;
+        }
+
+        @Override
+        public synchronized String orderingGroup() {
+            return orderingGroup;
+        }
+
+        @Override
+        public synchronized RawdataMessage.Builder sequenceNumber(long sequenceNumber) {
+            this.sequenceNumber = sequenceNumber;
+            return this;
+        }
+
+        @Override
+        public synchronized long sequenceNumber() {
+            return sequenceNumber;
+        }
 
         @Override
         public synchronized PulsarRawdataMessage.Builder ulid(ULID.Value ulid) {
             this.ulid = ulid;
             return this;
+        }
+
+        @Override
+        public synchronized ULID.Value ulid() {
+            return null;
         }
 
         @Override
@@ -131,14 +169,29 @@ public class PulsarRawdataMessage implements RawdataMessage {
         }
 
         @Override
+        public synchronized String position() {
+            return position;
+        }
+
+        @Override
         public synchronized PulsarRawdataMessage.Builder put(String key, byte[] payload) {
             data.put(key, payload);
             return this;
         }
 
         @Override
+        public synchronized Set<String> keys() {
+            return data.keySet();
+        }
+
+        @Override
+        public synchronized byte[] get(String key) {
+            return data.get(key);
+        }
+
+        @Override
         public synchronized PulsarRawdataMessage build() {
-            return new PulsarRawdataMessage(ulid, position, data);
+            return new PulsarRawdataMessage(ulid, orderingGroup, sequenceNumber, position, data);
         }
     }
 }

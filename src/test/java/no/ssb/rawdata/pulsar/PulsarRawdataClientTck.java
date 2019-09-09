@@ -1,5 +1,6 @@
 package no.ssb.rawdata.pulsar;
 
+import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
@@ -118,6 +119,25 @@ public class PulsarRawdataClientTck {
     public void thatPublishNonBufferedMessagesThrowsException() {
         RawdataProducer producer = client.producer("the-topic");
         producer.publish("unbuffered-1");
+    }
+
+    @Test
+    public void thatAllFieldsOfMessageSurvivesStream() throws InterruptedException {
+        RawdataProducer producer = client.producer("the-topic");
+        RawdataConsumer consumer = client.consumer("the-topic");
+
+        ULID.Value ulid = new ULID().nextValue();
+        producer.buffer(producer.builder().ulid(ulid).orderingGroup("og1").sequenceNumber(1).position("a").put("payload1", new byte[3]).put("payload2", new byte[7]));
+        producer.publish("a");
+
+        RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
+        assertEquals(message.ulid(), ulid);
+        assertEquals(message.orderingGroup(), "og1");
+        assertEquals(message.sequenceNumber(), 1);
+        assertEquals(message.position(), "a");
+        assertEquals(message.keys().size(), 2);
+        assertEquals(message.get("payload1"), new byte[3]);
+        assertEquals(message.get("payload2"), new byte[7]);
     }
 
     @Test
